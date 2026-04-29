@@ -1,0 +1,231 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  teacher
+  student
+  user
+  guest
+}
+
+enum CourseCategory {
+  qudurat_general
+  qudurat_quant
+  qudurat_verbal
+  tahsili_general
+  tahsili_math
+  tahsili_physics
+  tahsili_biology
+  tahsili_chemistry
+}
+
+enum Subject {
+  Math
+  Physics
+  Chemistry
+  Biology
+  Quant
+  Verbal
+}
+
+enum ContentType {
+  video
+  pdf
+  quiz
+  image
+  article
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  nationalID         String          @unique
+  fullName           String
+  role               UserRole        @default(student)
+  password           String?
+  gradeLevel         String?
+  classSection       String?
+  enrolledCourses    Course[]        @relation("UserEnrolledCourses")
+  mustChangePassword Boolean         @default(false)
+  examResults        ExamResult[]
+  studentProgress    StudentProgress[]
+  certificates       StudentCertificate[]
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}
+
+model Course {
+  id              String         @id @default(cuid())
+  title           String
+  category        CourseCategory
+  subject         Subject?
+  description     String
+  thumbnail       String
+  modules         Module[]
+  isPublished     Boolean        @default(false)
+  creatorId       String?
+  // Certificate logic
+  certificateTemplateId String?
+  congratulationsText   String? // Text to show in Stats tab when completing course
+  enrolledBy      User[]         @relation("UserEnrolledCourses")
+  studentProgress StudentProgress[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Module {
+  id        String        @id @default(cuid())
+  title     String
+  courseId  String
+  course    Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  content   ContentItem[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model ContentItem {
+  id           String      @id @default(cuid())
+  title        String
+  type         ContentType
+  url          String?
+  duration     Int?
+  quizId       String?
+  questions    String[]    // List of Question IDs
+  passingScore Int?
+  content      String?     // For Rich Text (article)
+  moduleId     String
+  module       Module      @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Question {
+  id            String   @id @default(cuid())
+  text          String
+  image         String?
+  options       String[]
+  correctOption Int
+  explanation   String?
+  subject       String
+  difficulty    String   @default("medium")
+  tags          String[]
+  creatorId     String?
+  isPrivate     Boolean  @default(false)
+  examId        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Exam {
+  id                    String         @id @default(cuid())
+  title                 String
+  duration              Int            // Minutes
+  passingScore          Int
+  isPublic              Boolean        @default(true)
+  type                  String         @default("simulation")
+  category              CourseCategory
+  sections              ExamSection[]
+  certificateTemplateId String?
+  certificateTemplate   CertificateTemplate? @relation(fields: [certificateTemplateId], references: [id])
+  randomizeQuestions    Boolean        @default(false)
+  startTime             DateTime?
+  endTime               DateTime?
+  assignedTo            Json?          // { gradeLevels: [], classSections: [], studentIds: [] }
+  results               ExamResult[]
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+}
+
+model ExamSection {
+  id          String   @id @default(cuid())
+  title       String
+  duration    Int      // Minutes
+  questionIds String[]
+  examId      String
+  exam        Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+}
+
+model ExamResult {
+  id             String   @id @default(cuid())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  guestName      String?
+  examId         String
+  exam           Exam     @relation(fields: [examId], references: [id])
+  score          Int
+  totalQuestions Int
+  correctAnswers Int
+  isPassed       Boolean
+  answers        Json
+  completedAt    DateTime @default(now())
+}
+
+model CertificateTemplate {
+  id              String   @id @default(cuid())
+  name            String
+  category        String   @default("exam")
+  backgroundImage String
+  elements        Json     // List of CertificateElement
+  isDefault       Boolean  @default(false)
+  widthMm         Float?
+  heightMm        Float?
+  bgFilters       Json?    // { brightness, contrast, grayscale, opacity, blur }
+  exams           Exam[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model StudentCertificate {
+  id         String   @id @default(cuid())
+  studentId  String
+  student    User     @relation(fields: [studentId], references: [id])
+  templateId String
+  issueDate  DateTime @default(now())
+  metadata   Json?    // { studentName, courseName, examTitle, score, date, etc }
+}
+
+model SchoolGrade {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  uniqueCode String   @unique
+  sections   String[]
+}
+
+model StudentProgress {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  courseId      String
+  course        Course   @relation(fields: [courseId], references: [id])
+  completedItems String[]
+  videoProgress Json?    // Record<contentId, seconds>
+  quizScores    Json?    // Record<contentId, score>
+  lastAccessed  DateTime @default(now())
+
+  @@unique([userId, courseId])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  senderId   String?  // null if system generated
+  receiverId String?  // null if broadcasting to a group
+  targetRole String?  // If broadcasting to a specific role, e.g. "student" or "teacher"
+  title      String
+  message    String
+  type       String   @default("general") // "password_reset", "announcement", "alert", "general"
+  actionData Json?    // Actionable metadata (e.g. { requesterId: "...", status: "pending/approved" })
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
