@@ -191,31 +191,39 @@ class MockBackendService {
   }
 
   private async postAPI<T = any>(endpoint: string, data: any): Promise<T | null> {
-    if (this.OFFLINE_MODE) return null; // Skip post in offline mode
-    try {
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({ message: res.statusText }));
-        console.error(`API Post Failed for ${endpoint}:`, errBody);
-        return null;
-      }
-      return await res.json();
-    } catch (e) {
-      console.error(`API Post Failed for ${endpoint}`, e);
-      return null;
+    if (this.OFFLINE_MODE) return null;
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(errBody.message || errBody.error || `Server error ${res.status}`);
     }
+    return await res.json();
+  }
+
+  private async putAPI<T = any>(endpoint: string, data: any): Promise<T | null> {
+    if (this.OFFLINE_MODE) return null;
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(errBody.message || errBody.error || `Server error ${res.status}`);
+    }
+    return await res.json();
   }
 
   private async deleteAPI(endpoint: string) {
-    if (this.OFFLINE_MODE) return; // Skip delete in offline mode
-    try {
-      await fetch(`${API_BASE}${endpoint}`, { method: 'DELETE' });
-    } catch (e) {
-      console.error(`API Delete Failed for ${endpoint}`, e);
+    if (this.OFFLINE_MODE) return;
+    const res = await fetch(`${API_BASE}${endpoint}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(errBody.message || errBody.error || `Server error ${res.status}`);
     }
   }
 
@@ -339,44 +347,38 @@ class MockBackendService {
     return user;
   }
 
-  createUser(user: User) {
+  async createUser(user: User) {
     if (this.users.find(u => u.nationalID === user.nationalID)) {
       throw new Error('User already exists');
     }
+    await this.postAPI('/users', user);
     this.users.push(user);
-    this.postAPI('/users', user);
-    this.persistAll(); // Persist
+    this.persistAll();
     return user;
   }
 
-  updateUser(user: User) {
+  async updateUser(user: User) {
     const idx = this.users.findIndex(u => u.id === user.id);
     if (idx >= 0) {
       this.users[idx] = { ...this.users[idx], ...user };
-      this.postAPI(`/users/${user.id}`, user);
+      await this.postAPI(`/users/${user.id}`, user);
       this.persistAll();
     }
     return user;
   }
 
-  deleteUser(userId: string) {
+  async deleteUser(userId: string) {
+    await this.deleteAPI(`/users/${userId}`);
     this.users = this.users.filter(u => u.id !== userId);
-    this.deleteAPI(`/users/${userId}`);
-    this.persistAll(); // Persist
+    this.persistAll();
   }
 
-  enrollUser(userId: string, courseId: string) {
+  async enrollUser(userId: string, courseId: string) {
     const user = this.users.find(u => u.id === userId);
     if (user && !user.enrolledCourses.includes(courseId)) {
       user.enrolledCourses.push(courseId);
-      if (!this.OFFLINE_MODE) {
-        fetch(`${API_BASE}/users/${userId}/enroll`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ courseId })
-        });
-      }
-      this.persistAll(); // Persist
+      await this.putAPI(`/users/${userId}/enroll`, { courseId });
+      this.persistAll();
     }
   }
 
@@ -435,9 +437,9 @@ class MockBackendService {
     return course;
   }
 
-  deleteCourse(id: string) {
+  async deleteCourse(id: string) {
+    await this.deleteAPI(`/courses/${id}`);
     this.courses = this.courses.filter(c => c.id !== id);
-    this.deleteAPI(`/courses/${id}`);
     this.persistAll();
   }
 
@@ -453,26 +455,26 @@ class MockBackendService {
     return this.questions.filter(q => allQIds.includes(q.id));
   }
 
-  createQuestion(q: Question) {
+  async createQuestion(q: Question) {
     const newQ = { ...q, id: q.id || `q_${Date.now()}_${Math.random().toString(36).substr(2, 5)}` };
+    await this.postAPI('/questions', newQ);
     this.questions.push(newQ);
-    this.postAPI('/questions', newQ);
     this.persistAll();
     return newQ;
   }
 
-  updateQuestion(id: string, updates: Partial<Question>) {
+  async updateQuestion(id: string, updates: Partial<Question>) {
     const idx = this.questions.findIndex(q => q.id === id);
     if (idx === -1) return null;
-    this.questions[idx] = { ...this.questions[idx], ...updates, id }; // preserve original ID
-    this.postAPI(`/questions/${id}`, this.questions[idx]);
+    this.questions[idx] = { ...this.questions[idx], ...updates, id };
+    await this.postAPI(`/questions/${id}`, this.questions[idx]);
     this.persistAll();
     return this.questions[idx];
   }
 
-  deleteQuestion(id: string) {
+  async deleteQuestion(id: string) {
+    await this.deleteAPI(`/questions/${id}`);
     this.questions = this.questions.filter(q => q.id !== id);
-    this.deleteAPI(`/questions/${id}`);
     this.persistAll();
   }
 
@@ -487,34 +489,34 @@ class MockBackendService {
     return this.exams.find(e => e.id === id);
   }
 
-  createExam(exam: Partial<Exam>) {
+  async createExam(exam: Partial<Exam>) {
     const newExam = { ...exam, id: `ex_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, sections: exam.sections || [] } as Exam;
+    await this.postAPI('/exams', newExam);
     this.exams.push(newExam);
-    this.postAPI('/exams', newExam);
     this.persistAll();
     return newExam;
   }
 
-  saveExam(exam: Partial<Exam>) {
+  async saveExam(exam: Partial<Exam>) {
     if (exam.id) {
       const idx = this.exams.findIndex(e => e.id === exam.id);
       if (idx >= 0) {
         this.exams[idx] = { ...this.exams[idx], ...exam } as Exam;
-        this.postAPI('/exams', this.exams[idx]);
+        await this.postAPI('/exams', this.exams[idx]);
         this.persistAll();
         return this.exams[idx];
       }
     }
-    return this.createExam(exam);
+    return await this.createExam(exam);
   }
 
-  deleteExam(id: string) {
+  async deleteExam(id: string) {
+    await this.deleteAPI(`/exams/${id}`);
     this.exams = this.exams.filter(e => e.id !== id);
-    this.deleteAPI(`/exams/${id}`);
     this.persistAll();
   }
 
-  duplicateExam(id: string) {
+  async duplicateExam(id: string) {
     const original = this.getExam(id);
     if (!original) return null;
 
@@ -522,31 +524,22 @@ class MockBackendService {
       ...original,
       id: `ex_${Date.now()}_copy_${Math.random().toString(36).substr(2, 5)}`,
       title: `${original.title} (نسخة)`,
-      isPublic: false, // Default to draft
-      // Clean up any other fields if necessary
+      isPublic: false,
     };
 
+    await this.postAPI('/exams', copy);
     this.exams.push(copy);
-    this.postAPI('/exams', copy);
     this.persistAll();
     return copy;
   }
 
-  submitExam(result: ExamResult): ExamResult {
+  async submitExam(result: ExamResult): Promise<ExamResult> {
     const exam = this.getExam(result.examId);
     if (!exam) throw new Error('Exam not found');
 
-    if (!this.OFFLINE_MODE) {
-      // In online mode, we might want to push to API, but for now we rely on the caller or this mock logic?
-      // Actually, the original code pushed to validation.
-      // But since we are cleaning up types, let's just store it.
-      // Ideally we post to /submit
-      this.postAPI(`/results`, result);
-    }
-
+    await this.postAPI(`/results`, result);
     this.results.push(result);
     this.saveToLS('almanara_results', this.results);
-
     return result;
   }
 
@@ -565,18 +558,18 @@ class MockBackendService {
     return this.progress[key];
   }
 
-  markContentComplete(userId: string, courseId: string, contentId: string) {
+  async markContentComplete(userId: string, courseId: string, contentId: string) {
     const key = `${userId}_${courseId}`;
     if (!this.progress[key]) this.getProgress(userId, courseId);
     if (!this.progress[key].completedItems.includes(contentId)) {
       this.progress[key].completedItems.push(contentId);
       this.progress[key].lastAccessed = new Date().toISOString();
-      this.postAPI('/progress', this.progress[key]);
+      await this.postAPI('/progress', this.progress[key]);
       this.persistAll();
     }
   }
 
-  toggleContentCompletion(userId: string, courseId: string, contentId: string): boolean {
+  async toggleContentCompletion(userId: string, courseId: string, contentId: string): Promise<boolean> {
     const key = `${userId}_${courseId}`;
     if (!this.progress[key]) this.getProgress(userId, courseId);
     const index = this.progress[key].completedItems.indexOf(contentId);
@@ -589,12 +582,12 @@ class MockBackendService {
       isComplete = true;
     }
     this.progress[key].lastAccessed = new Date().toISOString();
-    this.postAPI('/progress', this.progress[key]);
+    await this.postAPI('/progress', this.progress[key]);
     this.persistAll();
     return isComplete;
   }
 
-  updateVideoProgress(userId: string, courseId: string, contentId: string, seconds: number) {
+  async updateVideoProgress(userId: string, courseId: string, contentId: string, seconds: number) {
     const key = `${userId}_${courseId}`;
     if (!this.progress[key]) this.getProgress(userId, courseId);
     if (!this.progress[key].videoProgress) {
@@ -602,11 +595,11 @@ class MockBackendService {
     }
     this.progress[key].videoProgress![contentId] = seconds;
     this.progress[key].lastAccessed = new Date().toISOString();
-    this.postAPI('/progress', this.progress[key]);
+    await this.postAPI('/progress', this.progress[key]);
     this.persistAll();
   }
 
-  saveQuizScore(userId: string, courseId: string, contentId: string, score: number) {
+  async saveQuizScore(userId: string, courseId: string, contentId: string, score: number) {
     const key = `${userId}_${courseId}`;
     if (!this.progress[key]) this.getProgress(userId, courseId);
     if (!this.progress[key].quizScores) {
@@ -614,18 +607,18 @@ class MockBackendService {
     }
     this.progress[key].quizScores![contentId] = score;
     this.progress[key].lastAccessed = new Date().toISOString();
-    this.postAPI('/progress', this.progress[key]);
+    await this.postAPI('/progress', this.progress[key]);
     this.persistAll();
   }
 
-  resetCourseProgress(userId: string, courseId: string) {
+  async resetCourseProgress(userId: string, courseId: string) {
     const key = `${userId}_${courseId}`;
     if (this.progress[key]) {
       this.progress[key].completedItems = [];
       this.progress[key].videoProgress = {};
       this.progress[key].quizScores = {};
       this.progress[key].lastAccessed = new Date().toISOString();
-      this.postAPI('/progress', this.progress[key]);
+      await this.postAPI('/progress', this.progress[key]);
       this.persistAll();
     }
   }
@@ -645,20 +638,20 @@ class MockBackendService {
     return this.certTemplates;
   }
 
-  saveCertificateTemplate(tpl: CertificateTemplate) {
+  async saveCertificateTemplate(tpl: CertificateTemplate) {
     const idx = this.certTemplates.findIndex(t => t.id === tpl.id);
     if (idx >= 0) {
       this.certTemplates[idx] = tpl;
     } else {
       this.certTemplates.push(tpl);
     }
-    this.postAPI('/certificate-templates', tpl);
+    await this.postAPI('/certificate-templates', tpl);
     this.persistAll();
   }
 
-  deleteCertificateTemplate(id: string) {
+  async deleteCertificateTemplate(id: string) {
+    await this.deleteAPI(`/certificate-templates/${id}`);
     this.certTemplates = this.certTemplates.filter(t => t.id !== id);
-    this.deleteAPI(`/certificate-templates/${id}`);
     this.persistAll();
   }
 
@@ -668,7 +661,7 @@ class MockBackendService {
     return this.studentCertificates.filter(c => c.studentId === studentId);
   }
 
-  issueCertificate(cert: Partial<StudentCertificate>) {
+  async issueCertificate(cert: Partial<StudentCertificate>) {
     const newCert = {
       ...cert,
       id: `sc_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -676,7 +669,7 @@ class MockBackendService {
     } as StudentCertificate;
 
     this.studentCertificates.push(newCert);
-    this.postAPI('/student-certificates', newCert);
+    await this.postAPI('/student-certificates', newCert);
     this.persistAll();
     return newCert;
   }
@@ -692,33 +685,30 @@ class MockBackendService {
     return this.schoolGrades;
   }
 
-  saveGrade(grade: SchoolGrade) {
+  async saveGrade(grade: SchoolGrade) {
     const idx = this.schoolGrades.findIndex(g => g.id === grade.id);
     if (idx >= 0) {
       this.schoolGrades[idx] = grade;
     } else {
       this.schoolGrades.push({ ...grade, id: grade.id || `g_${Date.now()}` });
     }
-    this.postAPI('/grades', grade); // Ensure API push
+    await this.postAPI('/grades', grade);
     this.persistAll();
   }
 
-  deleteGrade(id: string) {
+  async deleteGrade(id: string) {
     const grade = this.schoolGrades.find(g => g.id === id);
+    await this.deleteAPI(`/grades/${id}`);
     this.schoolGrades = this.schoolGrades.filter(g => g.id !== id);
-    this.deleteAPI(`/grades/${id}`);
-    this.persistAll();
 
-    // Orphan Logic: Nullify grade/section for students in this grade
     if (grade) {
-      this.users.forEach(u => {
+      for (const u of this.users) {
         if (u.gradeLevel === grade.name) {
           u.gradeLevel = undefined;
           u.classSection = undefined;
-          this.postAPI(`/users/${u.id}`, u);
+          await this.postAPI(`/users/${u.id}`, u);
         }
-      });
-      // Also save users!
+      }
       this.saveToLS('almanara_users', this.users);
     }
   }
@@ -737,37 +727,25 @@ class MockBackendService {
 
   async markNotificationRead(id: string) {
     if (this.OFFLINE_MODE) return;
-    await fetch(`${API_BASE}/notifications/${id}/read`, { method: 'PUT' });
+    await this.putAPI(`/notifications/${id}/read`, {});
   }
 
   async requestPasswordReset(userId: string, targetAdminRole = 'admin') {
     const user = this.users.find(u => u.id === userId);
     if (!user) return;
     
-    // Create a notification for Admins
-    if (this.OFFLINE_MODE) return;
-    await fetch(`${API_BASE}/notifications`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        senderId: userId,
-        targetRole: targetAdminRole,
-        title: 'طلب إعادة تعيين كلمة المرور',
-        message: `طلب الطالب ${user.fullName} الموافقة على إعادة تعيين كلمة المرور.`,
-        type: 'password_reset',
-        actionData: { requesterId: userId, status: 'pending' }
-      })
+    await this.postAPI('/notifications', {
+      senderId: userId,
+      targetRole: targetAdminRole,
+      title: 'طلب إعادة تعيين كلمة المرور',
+      message: `طلب الطالب ${user.fullName} الموافقة على إعادة تعيين كلمة المرور.`,
+      type: 'password_reset',
+      actionData: { requesterId: userId, status: 'pending' }
     });
   }
 
   async approvePasswordReset(notificationId: string, requesterId: string) {
-    if (this.OFFLINE_MODE) return;
-    await fetch(`${API_BASE}/notifications/${notificationId}/approve-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requesterId })
-    });
-    // Locally update user if memory
+    await this.postAPI(`/notifications/${notificationId}/approve-reset`, { requesterId });
     const user = this.users.find(u => u.id === requesterId);
     if (user) {
       user.mustChangePassword = true;
@@ -776,12 +754,7 @@ class MockBackendService {
   }
 
   async rejectPasswordReset(notificationId: string, requesterId: string) {
-    if (this.OFFLINE_MODE) return;
-    await fetch(`${API_BASE}/notifications/${notificationId}/reject-reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requesterId })
-    });
+    await this.postAPI(`/notifications/${notificationId}/reject-reset`, { requesterId });
   }
 
 }

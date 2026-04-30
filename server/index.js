@@ -563,51 +563,41 @@ app.delete('/api/certificate-templates/:id', asyncHandler(async (req, res) => {
 
 app.post('/api/student-certificates', asyncHandler(async (req, res) => {
   const data = req.body;
-  const cert = await prisma.studentCertificate.create({
-    data: {
-      userId: data.userId,
-      templateId: data.templateId,
-      issueDate: new Date(),
-      metadata: data.metadata || {}
-    }
-  });
-  res.json(cert);
-}));
 
-app.get('/api/student-certificates/:userId', asyncHandler(async (req, res) => {
-  const certs = await prisma.studentCertificate.findMany({
-    where: { userId: req.params.userId }
-  });
-  res.json(certs);
-}));
-
-app.post('/api/student-certificates', asyncHandler(async (req, res) => {
-  const data = req.body;
-  // Upsert
+  // Upsert: update if exists, create if new
   if (data.id && await prisma.studentCertificate.findUnique({ where: { id: data.id } })) {
     const cert = await prisma.studentCertificate.update({
       where: { id: data.id },
       data: {
         studentId: data.studentId,
         templateId: data.templateId,
-        issueDate: data.issueDate,
-        metadata: data.metadata
+        issueDate: data.issueDate || new Date(),
+        metadata: data.metadata || {}
       }
     });
     res.json(cert);
   } else {
     const cert = await prisma.studentCertificate.create({
       data: {
-        id: data.id,
+        id: data.id || undefined,
         studentId: data.studentId,
-        templateId: data.templateId, // Ensure relation exists or handle string ID if not strict relation
-        issueDate: data.issueDate,
-        metadata: data.metadata
+        templateId: data.templateId,
+        issueDate: data.issueDate || new Date(),
+        metadata: data.metadata || {}
       }
     });
     res.json(cert);
   }
 }));
+
+app.get('/api/student-certificates/:studentId', asyncHandler(async (req, res) => {
+  const certs = await prisma.studentCertificate.findMany({
+    where: { studentId: req.params.studentId }
+  });
+  res.json(certs);
+}));
+
+
 
 // --- NOTIFICATION ROUTES ---
 

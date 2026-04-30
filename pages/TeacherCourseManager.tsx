@@ -187,16 +187,20 @@ const TeacherCourseManager = () => {
     }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     setConfirmModal({
       isOpen: true,
       title: 'حذف الدورة',
       message: 'هل أنت متأكد من حذف هذه الدورة نهائياً؟ لا يمكن التراجع عن هذا الإجراء.',
       type: 'danger',
-      onConfirm: () => {
-        backend.deleteCourse(id);
-        setCourses(backend.getCourses());
-        toast.success('تم الحذف بنجاح');
+      onConfirm: async () => {
+        try {
+          await backend.deleteCourse(id);
+          setCourses(backend.getCourses());
+          toast.success('تم الحذف بنجاح');
+        } catch (e: any) {
+          toast.error(`فشل الحذف: ${e.message || 'خطأ غير متوقع'}`);
+        }
       }
     });
   };
@@ -471,7 +475,7 @@ const TeacherCourseManager = () => {
       const XLSX = await import('xlsx');
       const reader = new FileReader();
 
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
         try {
           const data = evt.target?.result;
           const workbook = XLSX.read(data, { type: 'binary' });
@@ -487,7 +491,7 @@ const TeacherCourseManager = () => {
           
           rows.forEach((row, index) => {
              const text = row['السؤال'] || row['text'] || row['Question'];
-             if (!text) return; // Skip invalid row
+             if (!text) return;
 
              const opt1 = row['خيار1'] || row['option1'] || row['Option 1'];
              const opt2 = row['خيار2'] || row['option2'] || row['Option 2'];
@@ -495,7 +499,7 @@ const TeacherCourseManager = () => {
              const opt4 = row['خيار4'] || row['option4'] || row['Option 4'];
              
              const options = [opt1, opt2, opt3, opt4].filter(Boolean);
-             if (options.length < 2) return; // Must have at least 2 options
+             if (options.length < 2) return;
              
              let correctRaw = row['الاجابة_الصحيحة'] || row['correct'] || row['Correct'];
              let correctIndex = 0;
@@ -517,18 +521,18 @@ const TeacherCourseManager = () => {
              newQuestions.push({
                  id: 'q_' + Date.now() + '_' + index + Math.random().toString(36).substr(2, 5),
                  text: String(text),
-                 type: 'mcq',
                  options: options.map(String),
                  correctOption: correctIndex,
                  difficulty: mappedDifficulty,
                  subject: (quizSpecificSubject && quizSpecificSubject !== 'all') ? quizSpecificSubject : (editingCourse?.subject || Subject.MATH),
                  isPrivate: !addToBank,
-                 authorId: 'teacher'
              } as Question);
           });
 
           if (newQuestions.length > 0) {
-             newQuestions.forEach(q => backend.createQuestion(q));
+             for (const q of newQuestions) {
+                await backend.createQuestion(q);
+             }
              setAllQuestions(backend.getQuestions());
 
              const newIds = newQuestions.map(q => q.id);
@@ -542,9 +546,9 @@ const TeacherCourseManager = () => {
           } else {
              toast.error('لم يتم العثور على أسئلة صحيحة في الملف.', { id: toastId });
           }
-        } catch(err) {
+        } catch(err: any) {
           console.error(err);
-          toast.error('خطأ في قراءة ملف الإكسل', { id: toastId });
+          toast.error(`خطأ في الاستيراد: ${err.message}`, { id: toastId });
         }
       };
 
@@ -554,7 +558,7 @@ const TeacherCourseManager = () => {
     }
   };
 
-  const handleCreateAndAddQuestion = () => {
+  const handleCreateAndAddQuestion = async () => {
     if (!tempQuestion.text || !tempQuestion.options || tempQuestion.options.some(o => !o.trim())) {
       return toast.error('يرجى ملء جميع الحقول (السؤال والخيارات)');
     }
@@ -565,31 +569,25 @@ const TeacherCourseManager = () => {
       ...tempQuestion,
       subject: tempQuestion.subject || assignedSubject,
       id: `q_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      type: 'mcq',
-      isPrivate: !addToBank, // Map user's switch to internal state
-      authorId: 'teacher'
+      isPrivate: !addToBank,
     } as Question;
     
-    backend.createQuestion(newQ);
-
-    // Refresh local list
-    const updatedList = backend.getQuestions();
-    setAllQuestions(updatedList);
-
-    // Auto-select the new question
-    toggleQuestionForQuiz(newQ.id);
-
-    // Reset form
-    setTempQuestion({
-      text: '',
-      options: ['', '', '', ''],
-      correctOption: 0,
-      difficulty: 'medium',
-      subject: editingCourse?.subject || Subject.MATH
-    });
-
-    toast.success('تم إنشاء السؤال وإضافته للاختبار');
-    setQuizTab('selected'); // Switch back to selected list to see it
+    try {
+      await backend.createQuestion(newQ);
+      setAllQuestions(backend.getQuestions());
+      toggleQuestionForQuiz(newQ.id);
+      setTempQuestion({
+        text: '',
+        options: ['', '', '', ''],
+        correctOption: 0,
+        difficulty: 'medium',
+        subject: editingCourse?.subject || Subject.MATH
+      });
+      toast.success('تم إنشاء السؤال وإضافته للاختبار');
+      setQuizTab('selected');
+    } catch (e: any) {
+      toast.error(`فشل إنشاء السؤال: ${e.message}`);
+    }
   };
 
   const saveContent = () => {
@@ -686,91 +684,105 @@ const TeacherCourseManager = () => {
 
   if (view === 'list') {
     return (
-      <div className="bg-slate-50/80 dark:bg-slate-900/60 backdrop-blur-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.1)] p-8 rounded-3xl border border-gray-300 dark:border-slate-700/50 relative overflow-hidden animate-fade-in min-h-[70vh]">
-        {/* Decorative gradient blobs for list view background */}
-        <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] bg-primary-500/10 blur-[100px] rounded-full pointer-events-none" />
-        <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] bg-blue-500/10 blur-[100px] rounded-full pointer-events-none" />
+      <div className="bg-white/10 dark:bg-slate-900/40 backdrop-blur-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-10 rounded-[3rem] border border-white/20 dark:border-white/10 relative overflow-hidden animate-fade-in min-h-[80vh]">
+        {/* Animated Background Orbs */}
+        <div className="absolute -top-24 -right-24 w-96 h-96 bg-primary-500/20 blur-[120px] rounded-full animate-pulse pointer-events-none" />
+        <div className="absolute -bottom-24 -left-24 w-80 h-80 bg-blue-500/20 blur-[120px] rounded-full animate-pulse delay-1000 pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-purple-500/5 blur-[150px] rounded-full pointer-events-none" />
         
-        <div className="flex justify-between items-center mb-8 border-b border-gray-200/50 dark:border-slate-800/50 pb-6 relative z-10">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-12 gap-6 relative z-10">
           <div>
-            <h2 className="text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">مكتبة الدورات</h2>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">أنشئ وعدّل المحتوى التعليمي بسهولة</p>
+            <h2 className="text-5xl font-black bg-clip-text text-transparent bg-gradient-to-r from-gray-900 via-gray-700 to-gray-500 dark:from-white dark:via-gray-200 dark:to-gray-400 tracking-tight">مكتبة الدورات</h2>
+            <p className="text-gray-500 dark:text-gray-400 mt-3 text-lg font-medium opacity-80">إدارة وتطوير المحتوى التعليمي بمعايير عالمية</p>
           </div>
           <button
             onClick={handleCreateNew}
-            className="bg-primary-600/90 backdrop-blur-md text-white px-5 py-2.5 rounded-2xl flex items-center gap-2 hover:bg-primary-700 hover:shadow-lg hover:shadow-primary-600/20 transition-all duration-300 font-medium"
+            className="group relative overflow-hidden bg-primary-600 hover:bg-primary-500 text-white px-10 py-5 rounded-2xl flex items-center gap-3 transition-all duration-500 shadow-2xl shadow-primary-600/30 hover:shadow-primary-600/50 hover:-translate-y-1 active:scale-95"
           >
-            <Plus size={18} /> إنشاء دورة جديدة
+            <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+            <Plus size={24} strokeWidth={3} /> 
+            <span className="font-black text-xl">دورة جديدة</span>
           </button>
         </div>
 
-        {/* Filters */}
-        <div className="bg-white/40 dark:bg-slate-800/40 backdrop-blur-md p-4 rounded-2xl border border-white/50 dark:border-slate-700/50 flex flex-col md:flex-row gap-4 items-center mb-6 shadow-sm relative z-10">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute right-3 top-2.5 text-gray-400" size={18} />
+        {/* Premium Search & Filter Bar */}
+        <div className="bg-white/20 dark:bg-slate-800/20 backdrop-blur-2xl p-6 rounded-[2.5rem] border border-white/40 dark:border-white/5 flex flex-col md:flex-row gap-6 items-center mb-12 shadow-xl relative z-10">
+          <div className="relative flex-1 w-full group">
+            <Search className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-primary-500 transition-colors" size={22} />
             <input
-              className="w-full pl-4 pr-10 py-2.5 rounded-xl border-0 bg-white/60 dark:bg-slate-900/60 shadow-inner dark:text-white focus:ring-2 focus:ring-primary-500/50 outline-none transition-all duration-300"
-              placeholder="بحث عن دورة..."
+              className="w-full pl-6 pr-14 py-5 rounded-[1.5rem] border border-white/20 bg-white/40 dark:bg-slate-900/60 backdrop-blur-md dark:text-white focus:ring-4 focus:ring-primary-500/10 outline-none transition-all duration-500 placeholder:text-gray-400 font-bold text-lg"
+              placeholder="عن ماذا تبحث اليوم؟..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="w-full md:w-64">
+          <div className="w-full md:w-80">
             <CustomSelect
               options={filterCategoryOptions}
               value={filterCategory}
               onChange={setFilterCategory}
-              placeholder="التصنيف"
-              className="text-sm"
+              placeholder="جميع الأقسام"
+              className="premium-glass-select"
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 relative z-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-10 relative z-10">
           {filteredCourses.map(course => (
-            <div key={course.id} className="bg-white/40 dark:bg-slate-800/40 backdrop-blur-md rounded-3xl shadow-sm border border-white/50 dark:border-slate-700/50 overflow-hidden group hover:bg-white/80 dark:hover:bg-slate-800/80 hover:shadow-xl hover:shadow-black/5 hover:-translate-y-1 transition-all duration-300">
-              <div className="h-40 bg-gray-200 dark:bg-slate-800 relative">
-                <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-
-                {course.isPublished ? (
-                  <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded font-bold shadow-sm flex items-center gap-1">
-                    <Eye size={12} /> منشور
-                  </div>
-                ) : (
-                  <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded font-bold shadow-sm flex items-center gap-1">
-                    <EyeOff size={12} /> مسودة
-                  </div>
-                )}
-              </div>
-              <div className="p-5">
-                <div className="flex gap-2 mb-2">
-                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-slate-800 px-2 py-1 rounded">
-                    {course.modules.length} وحدات
-                  </span>
-                  <span className="text-xs font-bold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 px-2 py-1 rounded">
-                    {CATEGORY_LABELS[course.category]}
-                  </span>
+            <div key={course.id} className="group relative bg-white/30 dark:bg-slate-800/20 backdrop-blur-xl rounded-[3rem] shadow-2xl border border-white/30 dark:border-white/5 overflow-hidden transition-all duration-500 hover:shadow-primary-500/10 hover:-translate-y-3">
+              <div className="h-64 bg-gray-200 dark:bg-slate-800 relative overflow-hidden">
+                <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-60 group-hover:opacity-90 transition-opacity duration-500" />
+                
+                <div className="absolute top-5 right-5 flex gap-2">
+                  {course.isPublished ? (
+                    <div className="bg-green-500/90 backdrop-blur-md text-white text-[10px] px-4 py-2 rounded-full font-black shadow-lg flex items-center gap-2">
+                      <div className="w-2 h-2 bg-white rounded-full animate-pulse" /> منشور
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-500/90 backdrop-blur-md text-white text-[10px] px-4 py-2 rounded-full font-black shadow-lg flex items-center gap-2">
+                      <EyeOff size={14} /> مسودة
+                    </div>
+                  )}
                 </div>
-                <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 line-clamp-1">{course.title}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 line-clamp-2 h-10">{course.description || 'لا يوجد وصف'}</p>
+              </div>
 
-                <div className="flex gap-2 pt-4 border-t border-gray-100 dark:border-slate-800">
-                  <button onClick={() => handleEdit(course)} className="flex-1 py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg font-bold text-sm hover:bg-primary-100 dark:hover:bg-primary-900/30 flex items-center justify-center gap-2">
-                    <Edit3 size={16} /> تعديل
-                  </button>
-                  <button onClick={() => handleDelete(course.id)} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition">
-                    <Trash2 size={18} />
-                  </button>
+              <div className="p-8 pt-0 -mt-12 relative z-20">
+                <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-[2rem] p-6 shadow-xl border border-white/50 dark:border-white/10">
+                  <div className="flex gap-2 mb-4">
+                    <span className="text-[10px] uppercase tracking-tighter font-black text-primary-600 dark:text-primary-400 bg-primary-500/10 px-3 py-1.5 rounded-lg border border-primary-500/20">
+                      {CATEGORY_LABELS[course.category]}
+                    </span>
+                    <span className="text-[10px] uppercase tracking-tighter font-black text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-white/5">
+                      {course.modules.length} دروس
+                    </span>
+                  </div>
+                  <h3 className="font-black text-2xl text-gray-900 dark:text-white mb-3 line-clamp-1 group-hover:text-primary-600 transition-colors tracking-tight">{course.title}</h3>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 line-clamp-2 h-10 leading-relaxed font-medium">{course.description || 'لم يتم إضافة وصف لهذه الدورة بعد. سيظهر الوصف هنا عند إضافته.'}</p>
+
+                  <div className="flex gap-3">
+                    <button onClick={() => handleEdit(course)} className="flex-[4] py-4 bg-primary-600 text-white rounded-2xl font-black text-sm hover:bg-primary-700 shadow-xl shadow-primary-600/20 hover:shadow-primary-600/40 transition-all active:scale-95 flex items-center justify-center gap-2">
+                      <Edit3 size={20} /> تعديل الدورة
+                    </button>
+                    <button onClick={() => handleDelete(course.id)} className="flex-1 py-4 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-2xl font-bold transition-all hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg shadow-red-500/5 hover:shadow-red-500/20">
+                      <Trash2 size={22} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           ))}
-          {filteredCourses.length === 0 && (
-            <div className="col-span-full py-12 text-center border-2 border-dashed border-gray-200 dark:border-slate-800 rounded-xl text-gray-400">
-              لا توجد دورات تطابق البحث.
-            </div>
-          )}
         </div>
+
+        {filteredCourses.length === 0 && (
+          <div className="py-32 text-center border-4 border-dashed border-gray-200 dark:border-white/5 rounded-[4rem] animate-pulse relative z-10">
+            <div className="bg-gray-100 dark:bg-slate-800 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6">
+               <Search size={40} className="text-gray-300" strokeWidth={1.5} />
+            </div>
+            <p className="text-3xl font-black text-gray-300">لا توجد دورات متاحة حالياً</p>
+            <button onClick={() => {setSearchTerm(''); setFilterCategory('all');}} className="mt-6 text-primary-500 font-bold hover:underline">إعادة ضبط الفلاتر</button>
+          </div>
+        )}
 
         <ConfirmModal
           isOpen={confirmModal.isOpen}
@@ -815,48 +827,60 @@ const TeacherCourseManager = () => {
   ];
 
   return (
-    <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.1)] p-8 rounded-3xl border border-white/50 dark:border-slate-700/50 relative overflow-hidden animate-fade-in">
-      {/* Decorative gradient blobs */}
-      <div className="absolute top-[-10%] right-[-5%] w-[400px] h-[400px] bg-primary-500/10 blur-[100px] rounded-full pointer-events-none" />
-      <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] bg-blue-500/10 blur-[100px] rounded-full pointer-events-none" />
+    <div className="bg-white/10 dark:bg-slate-900/40 backdrop-blur-[40px] shadow-2xl p-10 rounded-[3rem] border border-white/30 dark:border-white/10 relative overflow-hidden animate-fade-in min-h-[90vh]">
+      {/* Dynamic Background Effects */}
+      <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-500/10 blur-[150px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-blue-500/10 blur-[150px] rounded-full pointer-events-none" />
 
-      {/* Improved Sticky Editor Header */}
-      <div className="sticky top-[-32px] z-40 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-b border-gray-200/50 dark:border-slate-800/50 py-4 px-6 -mx-8 mb-8 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center shadow-sm">
-        <div className="flex items-center gap-4">
-          <button onClick={handleCancelEdit} className="text-gray-400 hover:text-gray-700 dark:hover:text-white transition bg-white/50 dark:bg-slate-800/50 backdrop-blur-md border border-white/50 dark:border-slate-700/50 p-2 rounded-xl">
-            <ArrowRight size={20} />
+
+      {/* Premium Sticky Header */}
+      <div className="sticky top-[-40px] z-[100] bg-white/20 dark:bg-slate-900/40 backdrop-blur-2xl border-b border-white/30 dark:border-white/10 py-6 px-10 -mx-10 mb-10 flex flex-col sm:flex-row gap-6 justify-between items-start sm:items-center shadow-lg">
+        <div className="flex items-center gap-6">
+          <button onClick={handleCancelEdit} className="group p-3.5 rounded-2xl bg-white/40 dark:bg-slate-800/40 border border-white/50 dark:border-white/10 hover:bg-primary-600 hover:text-white transition-all duration-500 shadow-lg active:scale-90">
+            <ArrowRight size={24} strokeWidth={2.5} />
           </button>
           <div>
-            <h2 className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 leading-tight">محرر الدورة</h2>
-            <span className="text-xs font-bold text-gray-500 dark:text-gray-400 mt-0.5 block">{editingCourse.title || 'دورة جديدة'}</span>
-            {!editingCourse.isPublished && <span className="mt-1 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded font-bold">مسودة</span>}
+            <div className="flex items-center gap-3">
+              <h2 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-gray-900 via-gray-700 to-gray-500 dark:from-white dark:via-gray-200 dark:to-gray-400 tracking-tight">محرر المحتوى</h2>
+              {!editingCourse.isPublished && (
+                <span className="px-3 py-1 bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-black rounded-full border border-yellow-500/30 uppercase tracking-widest">مسودة</span>
+              )}
+            </div>
+            <p className="text-gray-500 dark:text-gray-400 mt-1 font-bold opacity-70 flex items-center gap-2">
+              <Edit3 size={14} />
+              {editingCourse.title || 'دورة تعليمية جديدة'}
+            </p>
           </div>
         </div>
-        <div className="flex gap-3 w-full sm:w-auto">
-          <button onClick={handleCancelEdit} className="flex-1 sm:flex-none px-5 py-2.5 bg-white/50 dark:bg-slate-800/50 backdrop-blur-md border-white/50 dark:border-slate-700/50 border rounded-2xl hover:bg-gray-50/80 dark:hover:bg-slate-800/80 dark:text-white transition-all duration-300 shadow-sm font-medium">إلغاء</button>
-          <button onClick={handleSaveCourse} className="flex-1 sm:flex-none px-5 py-2.5 bg-primary-600/90 backdrop-blur-md text-white rounded-2xl hover:bg-primary-700 hover:shadow-lg hover:shadow-primary-600/20 transition-all duration-300 flex items-center justify-center gap-2 font-medium">
-            <Save size={18} /> حفظ التغييرات
+        <div className="flex gap-4 w-full sm:w-auto">
+          <button onClick={handleCancelEdit} className="flex-1 sm:flex-none px-8 py-4 bg-white/40 dark:bg-slate-800/40 backdrop-blur-xl border border-white/50 dark:border-white/10 rounded-2xl hover:bg-white/60 dark:hover:bg-slate-800/60 transition-all font-black text-gray-700 dark:text-white shadow-lg active:scale-95">إلغاء</button>
+          <button onClick={handleSaveCourse} className="flex-1 sm:flex-none px-10 py-4 bg-primary-600 text-white rounded-2xl font-black shadow-xl shadow-primary-600/30 hover:bg-primary-500 hover:-translate-y-1 transition-all active:scale-95 flex items-center justify-center gap-3">
+            <Save size={20} strokeWidth={2.5} /> حفظ ونشر التغييرات
           </button>
         </div>
       </div>
 
-      {/* Editor Tabs Switcher */}
-      <div className="flex gap-4 mb-6 relative z-10 mx-auto sm:mx-0 bg-white/30 dark:bg-slate-800/30 w-fit p-1.5 rounded-2xl backdrop-blur-md border border-white/50 dark:border-slate-700/50 shadow-sm">
-        <button onClick={() => setEditorTab('content')} className={`px-5 py-2.5 font-bold text-sm transition-all focus:outline-none rounded-xl flex items-center gap-2 ${editorTab === 'content' ? 'bg-white dark:bg-slate-800 shadow-md shadow-primary-500/10 text-primary-600 dark:text-primary-400' : 'bg-transparent text-gray-500 hover:text-gray-800 hover:bg-white/50 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-slate-700/50'}`}>
-          <List size={18} />
-          المحتوى والوحدات
+      {/* Elegant Tab Switcher */}
+      <div className="inline-flex p-2 bg-white/20 dark:bg-slate-800/30 backdrop-blur-3xl rounded-[2rem] border border-white/40 dark:border-white/10 mb-10 shadow-2xl relative z-10">
+        <button 
+          onClick={() => setEditorTab('content')} 
+          className={`px-8 py-4 rounded-[1.5rem] font-black text-sm transition-all duration-500 flex items-center gap-3 ${editorTab === 'content' ? 'bg-primary-600 text-white shadow-xl shadow-primary-600/20' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'}`}
+        >
+          <List size={20} /> بناء المنهج
         </button>
-        <button onClick={() => setEditorTab('landing')} className={`px-5 py-2.5 font-bold text-sm transition-all focus:outline-none rounded-xl flex items-center gap-2 ${editorTab === 'landing' ? 'bg-white dark:bg-slate-800 shadow-md shadow-primary-500/10 text-primary-600 dark:text-primary-400' : 'bg-transparent text-gray-500 hover:text-gray-800 hover:bg-white/50 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-slate-700/50'}`}>
-          <Layout size={18} />
-          تصميم واجهة التسجيل (Landing Page)
+        <button 
+          onClick={() => setEditorTab('landing')} 
+          className={`px-8 py-4 rounded-[1.5rem] font-black text-sm transition-all duration-500 flex items-center gap-3 ${editorTab === 'landing' ? 'bg-primary-600 text-white shadow-xl shadow-primary-600/20' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'}`}
+        >
+          <Layout size={20} /> واجهة التسجيل
         </button>
       </div>
 
       {editorTab === 'content' ? (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 relative z-10 animate-fade-in">
         {/* Settings Column */}
-        <div className="col-span-1 space-y-6 p-6 bg-white/40 dark:bg-slate-800/40 backdrop-blur-xl border border-white/50 dark:border-slate-700/50 rounded-3xl shadow-sm h-fit">
-          <h3 className="font-bold text-gray-800 dark:text-white border-b border-gray-200/50 dark:border-slate-800/50 pb-2 mb-4 text-lg">بيانات الدورة</h3>
+        <div className="col-span-1 space-y-6 p-8 bg-white/20 dark:bg-slate-800/20 backdrop-blur-2xl border border-white/30 dark:border-white/10 rounded-[2rem] shadow-xl h-fit">
+          <h3 className="font-black text-gray-800 dark:text-white border-b border-white/20 dark:border-white/5 pb-3 mb-5 text-xl tracking-tight">بيانات الدورة</h3>
           
           <div className="space-y-6">
             <div>
