@@ -443,6 +443,43 @@ class MockBackendService {
     this.persistAll();
   }
 
+  async duplicateCourse(id: string) {
+    const original = this.getCourse(id);
+    if (!original) throw new Error('Course not found');
+
+    const uid = () => `${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    const newCourse: Course = {
+      ...JSON.parse(JSON.stringify(original)),
+      id: `c_${uid()}`,
+      title: `${original.title} (نسخة)`,
+      isPublished: false,
+      modules: original.modules.map(m => ({
+        ...JSON.parse(JSON.stringify(m)),
+        id: `m_${uid()}`,
+        content: m.content.map(c => ({
+          ...JSON.parse(JSON.stringify(c)),
+          id: `cnt_${uid()}`
+        }))
+      }))
+    };
+
+    // Serialize meta for Prisma (same pattern as saveCourse)
+    const payload = JSON.parse(JSON.stringify(newCourse));
+    payload.thumbnail = "META:" + JSON.stringify({
+      thumbnail: newCourse.thumbnail,
+      isPublic: newCourse.isPublic ?? true,
+      landingPageConfig: newCourse.landingPageConfig
+    });
+    delete payload.isPublic;
+    delete payload.landingPageConfig;
+
+    await this.postAPI('/courses', payload);
+    this.courses.push(newCourse);
+    this.persistAll();
+    return newCourse;
+  }
+
   // --- QUESTION BANK ---
 
   getQuestions() { return this.questions; }

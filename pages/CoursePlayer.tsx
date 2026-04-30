@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { backend } from '../services/mockBackend';
 import { Course, Module, ContentItem, ContentType, Question } from '../types';
 import { useAuth } from '../App';
@@ -224,6 +224,12 @@ const CoursePlayer = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Preview Mode Detection
+  const isPreview = (location.state as any)?.preview === true;
+  const previewReturnUrl = (location.state as any)?.returnUrl || '/dashboard';
+
   const [course, setCourse] = useState<Course | null>(null);
   const [activeModuleId, setActiveModuleId] = useState<string>('');
   const [activeContent, setActiveContent] = useState<ContentItem | null>(null);
@@ -342,8 +348,8 @@ const CoursePlayer = () => {
       return;
     }
 
-    // Strict Draft Visibility Check
-    if (!c.isPublished && user?.role === 'student') {
+    // Strict Draft Visibility Check (bypass in preview mode)
+    if (!c.isPublished && user?.role === 'student' && !isPreview) {
       toast.error('عذراً، هذه الدورة غير متاحة للعرض حالياً.');
       navigate('/dashboard');
       return;
@@ -351,10 +357,10 @@ const CoursePlayer = () => {
 
     setCourse(c);
 
-    if (activeUserId) {
+    if (activeUserId && !isPreview) {
       const p = backend.getProgress(activeUserId, c.id);
       setCompletedItems(p.completedItems);
-    } else if (!c.isPublic) {
+    } else if (!c.isPublic && !isPreview) {
        // if no user/guest and course is private, redirect
        toast.error('هذه الدورة تتطلب تسجيل الدخول.');
        navigate('/login');
@@ -406,6 +412,7 @@ const CoursePlayer = () => {
   }, [activeContent]);
 
   const handleToggleCompletion = (forceComplete = false) => {
+    if (isPreview) return; // Preview mode: no progress saving
     if (!activeUserId || !course || !activeContent) return;
 
     // Check if it's a video and enforce logic
@@ -464,8 +471,8 @@ const CoursePlayer = () => {
       handleToggleCompletion(true);
     }
 
-    // Debounced Progress Save to Backend
-    if (activeUserId && course && activeContent) {
+    // Debounced Progress Save to Backend (skip in preview mode)
+    if (activeUserId && course && activeContent && !isPreview) {
       if (progressSaveTimeout.current) clearTimeout(progressSaveTimeout.current);
       progressSaveTimeout.current = setTimeout(() => {
         backend.updateVideoProgress(activeUserId, course.id, activeContent.id, state.playedSeconds);
@@ -485,7 +492,7 @@ const CoursePlayer = () => {
     const percentage = (score / quizQuestions.length) * 100;
     const passing = activeContent.passingScore || 60;
 
-    if (activeUserId && course) {
+    if (activeUserId && course && !isPreview) {
       backend.saveQuizScore(activeUserId, course.id, activeContent.id, percentage);
     }
 
@@ -528,8 +535,8 @@ const CoursePlayer = () => {
         return;
       }
       
-      // Auto issue certificate
-      if (course.certificateTemplateId) {
+      // Auto issue certificate (skip in preview)
+      if (course.certificateTemplateId && !isPreview) {
          const existingCerts = backend.getStudentCertificates(activeUserId || '');
          const alreadyIssued = existingCerts.some(c => c.templateId === course.certificateTemplateId);
          
@@ -577,6 +584,7 @@ const CoursePlayer = () => {
 
   // Certificate Logic
   const issueCertificateIfNeeded = () => {
+    if (isPreview) return; // Preview mode: no certificate issuance
     if (!course || !course.certificateTemplateId) return;
 
     // Check if truly completed all items
@@ -623,6 +631,22 @@ const CoursePlayer = () => {
 
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden bg-gray-100 dark:bg-slate-950">
+
+      {/* Preview Mode Banner */}
+      {isPreview && (
+        <div className="sticky top-0 z-[200] bg-amber-500/20 dark:bg-amber-900/30 backdrop-blur-2xl border-b border-amber-500/30 px-6 py-3 flex items-center justify-between shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse" />
+            <span className="font-black text-amber-700 dark:text-amber-300 text-sm">وضع المعاينة — الإحصائيات والتقدم لن يُحفظا</span>
+          </div>
+          <button
+            onClick={() => navigate(previewReturnUrl)}
+            className="px-5 py-2 bg-white/60 dark:bg-slate-800/60 backdrop-blur-md border border-amber-500/30 rounded-xl text-amber-800 dark:text-amber-300 font-black text-xs hover:bg-white/80 dark:hover:bg-slate-700/80 transition-all active:scale-95 shadow-lg"
+          >
+            الخروج من وضع المعاينة
+          </button>
+        </div>
+      )}
 
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">

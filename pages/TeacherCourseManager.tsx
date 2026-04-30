@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { backend } from '../services/mockBackend';
 import { Course, CourseCategory, Subject, ContentType, Module, ContentItem, Question, CertificateTemplate } from '../types';
-import { Plus, Trash2, Save, Video, FileText, Globe, Shield, Settings2, Palette, Layout, ExternalLink, Image as ImageIcon, ChevronDown, ChevronUp, Edit3, Eye, MoreVertical, Upload, Link as LinkIcon, HelpCircle, Search, CheckSquare, ArrowRight, EyeOff, CheckCircle2, List, AlertCircle, GripVertical } from 'lucide-react';
+import { Plus, Trash2, Save, Video, FileText, Globe, Shield, Settings2, Palette, Layout, ExternalLink, Image as ImageIcon, ChevronDown, ChevronUp, Edit3, Eye, MoreVertical, Upload, Link as LinkIcon, HelpCircle, Search, CheckSquare, ArrowRight, EyeOff, CheckCircle2, List, AlertCircle, GripVertical, Copy, BarChart3, Printer, Download, Users, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CATEGORY_LABELS, SUBJECT_TRANSLATIONS } from '../constants';
 import CustomSelect from '../components/CustomSelect';
@@ -35,6 +36,7 @@ import { uploadFile } from '../services/uploadService';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 const TeacherCourseManager = () => {
+  const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>(backend.getCourses());
   const [certOptions, setCertOptions] = useState<{value: string, label: string}[]>([{ value: '', label: 'بدون شهادة' }]);
 
@@ -95,6 +97,51 @@ const TeacherCourseManager = () => {
   // Upload State
   const [isUploading, setIsUploading] = useState(false);
   const [uploadMode, setUploadMode] = useState<'url' | 'file'>('url');
+
+  // Analytics Modal State
+  const [statsModalCourse, setStatsModalCourse] = useState<Course | null>(null);
+  const statsRef = useRef<HTMLDivElement>(null);
+
+  // --- HANDLERS: Duplicate / Preview / Analytics ---
+  const handleDuplicateCourse = async (courseId: string) => {
+    const toastId = toast.loading('جاري نسخ الدورة...');
+    try {
+      const copy = await backend.duplicateCourse(courseId);
+      setCourses(backend.getCourses());
+      toast.success(`تم نسخ الدورة: "${copy.title}"`, { id: toastId });
+    } catch (e: any) {
+      toast.error(`فشل النسخ: ${e.message}`, { id: toastId });
+    }
+  };
+
+  const handlePreviewCourse = (courseId: string) => {
+    navigate(`/course/${courseId}`, {
+      state: { preview: true, returnUrl: '/dashboard/courses' }
+    });
+  };
+
+  const handlePrintStats = () => {
+    window.print();
+  };
+
+  const handleDownloadStatsPDF = async () => {
+    if (!statsRef.current) return;
+    const toastId = toast.loading('جاري تجهيز التقرير...');
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const { jsPDF } = await import('jspdf');
+      const canvas = await html2canvas(statsRef.current, { scale: 2, useCORS: true, backgroundColor: '#1e293b' });
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const w = pdf.internal.pageSize.getWidth();
+      const h = (canvas.height * w) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
+      pdf.save(`course-stats-${statsModalCourse?.title || 'report'}.pdf`);
+      toast.success('تم تحميل التقرير', { id: toastId });
+    } catch (e) {
+      toast.error('فشل تحميل التقرير', { id: toastId });
+    }
+  };
 
   // Quiz Management State
   const [allQuestions, setAllQuestions] = useState<Question[]>(backend.getQuestions());
@@ -760,12 +807,21 @@ const TeacherCourseManager = () => {
                   <h3 className="font-black text-2xl text-gray-900 dark:text-white mb-3 line-clamp-1 group-hover:text-primary-600 transition-colors tracking-tight">{course.title}</h3>
                   <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 line-clamp-2 h-10 leading-relaxed font-medium">{course.description || 'لم يتم إضافة وصف لهذه الدورة بعد. سيظهر الوصف هنا عند إضافته.'}</p>
 
-                  <div className="flex gap-3">
-                    <button onClick={() => handleEdit(course)} className="flex-[4] py-4 bg-primary-600 text-white rounded-2xl font-black text-sm hover:bg-primary-700 shadow-xl shadow-primary-600/20 hover:shadow-primary-600/40 transition-all active:scale-95 flex items-center justify-center gap-2">
-                      <Edit3 size={20} /> تعديل الدورة
+                  <div className="flex gap-2">
+                    <button onClick={() => handleEdit(course)} className="flex-[3] py-3.5 bg-primary-600 text-white rounded-2xl font-black text-sm hover:bg-primary-700 shadow-xl shadow-primary-600/20 hover:shadow-primary-600/40 transition-all active:scale-95 flex items-center justify-center gap-2">
+                      <Edit3 size={18} /> تعديل
                     </button>
-                    <button onClick={() => handleDelete(course.id)} className="flex-1 py-4 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-2xl font-bold transition-all hover:bg-red-500 hover:text-white flex items-center justify-center shadow-lg shadow-red-500/5 hover:shadow-red-500/20">
-                      <Trash2 size={22} />
+                    <button onClick={() => handlePreviewCourse(course.id)} title="معاينة" className="flex-1 py-3.5 bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-white/50 dark:border-white/10 text-gray-600 dark:text-gray-300 rounded-2xl font-bold transition-all hover:bg-blue-500 hover:text-white hover:border-blue-500 active:scale-95 flex items-center justify-center">
+                      <Eye size={18} />
+                    </button>
+                    <button onClick={() => setStatsModalCourse(course)} title="إحصائيات" className="flex-1 py-3.5 bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-white/50 dark:border-white/10 text-gray-600 dark:text-gray-300 rounded-2xl font-bold transition-all hover:bg-emerald-500 hover:text-white hover:border-emerald-500 active:scale-95 flex items-center justify-center">
+                      <BarChart3 size={18} />
+                    </button>
+                    <button onClick={() => handleDuplicateCourse(course.id)} title="نسخ الدورة" className="flex-1 py-3.5 bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-white/50 dark:border-white/10 text-gray-600 dark:text-gray-300 rounded-2xl font-bold transition-all hover:bg-purple-500 hover:text-white hover:border-purple-500 active:scale-95 flex items-center justify-center">
+                      <Copy size={18} />
+                    </button>
+                    <button onClick={() => handleDelete(course.id)} title="حذف" className="flex-1 py-3.5 bg-red-50 dark:bg-red-500/10 text-red-500 rounded-2xl font-bold transition-all hover:bg-red-500 hover:text-white active:scale-95 flex items-center justify-center shadow-lg shadow-red-500/5 hover:shadow-red-500/20">
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
@@ -782,6 +838,161 @@ const TeacherCourseManager = () => {
             <p className="text-3xl font-black text-gray-300">لا توجد دورات متاحة حالياً</p>
             <button onClick={() => {setSearchTerm(''); setFilterCategory('all');}} className="mt-6 text-primary-500 font-bold hover:underline">إعادة ضبط الفلاتر</button>
           </div>
+        )}
+
+        {/* Analytics Modal */}
+        {statsModalCourse && createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={() => setStatsModalCourse(null)}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
+            <div
+              ref={statsRef}
+              onClick={e => e.stopPropagation()}
+              className="relative w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white/10 dark:bg-slate-900/60 backdrop-blur-3xl rounded-[3rem] border border-white/20 dark:border-white/10 shadow-2xl p-10 animate-fade-in"
+            >
+              {/* Glowing Orbs */}
+              <div className="absolute -top-20 -right-20 w-80 h-80 bg-emerald-500/20 blur-[120px] rounded-full pointer-events-none" />
+              <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-blue-500/20 blur-[120px] rounded-full pointer-events-none" />
+
+              {/* Header */}
+              <div className="flex justify-between items-start mb-10 relative z-10">
+                <div>
+                  <h2 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-blue-400 tracking-tight flex items-center gap-3">
+                    <BarChart3 size={28} /> إحصائيات الدورة
+                  </h2>
+                  <p className="text-gray-400 mt-1 font-bold">{statsModalCourse.title}</p>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={handlePrintStats} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-white transition-all active:scale-90" title="طباعة">
+                    <Printer size={20} />
+                  </button>
+                  <button onClick={handleDownloadStatsPDF} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-white transition-all active:scale-90" title="تحميل PDF">
+                    <Download size={20} />
+                  </button>
+                  <button onClick={() => setStatsModalCourse(null)} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-red-400 transition-all active:scale-90">
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Stats Cards */}
+              {(() => {
+                const allUsers = backend.getUsers();
+                const allContent = statsModalCourse.modules.flatMap(m => m.content);
+                const totalItems = allContent.length;
+                const quizzes = allContent.filter(c => c.type === ContentType.QUIZ);
+                const grades = backend.getGrades();
+
+                // Find enrolled students
+                const enrolledStudents = allUsers.filter(u =>
+                  u.role === 'student' && u.enrolledCourses?.some((ec: any) => (typeof ec === 'string' ? ec : ec.id) === statsModalCourse.id)
+                );
+
+                // Calculate average completion
+                let totalCompletion = 0;
+                const studentData = enrolledStudents.map(s => {
+                  const prog = backend.getProgress(s.id, statsModalCourse.id);
+                  const completed = prog?.completedItems?.length || 0;
+                  const pct = totalItems > 0 ? Math.round((completed / totalItems) * 100) : 0;
+                  totalCompletion += pct;
+
+                  // Quiz pass rate for this student
+                  let quizPassed = 0;
+                  quizzes.forEach(q => {
+                    const score = prog?.quizScores?.[q.id];
+                    if (score !== undefined && score >= (q.passingScore || 60)) quizPassed++;
+                  });
+
+                  return {
+                    id: s.id,
+                    name: s.fullName,
+                    grade: s.gradeLevel || '-',
+                    section: s.classSection || '-',
+                    completion: pct,
+                    quizPass: quizzes.length > 0 ? Math.round((quizPassed / quizzes.length) * 100) : 0,
+                    lastAccessed: prog?.lastAccessed ? new Date(prog.lastAccessed).toLocaleDateString('ar-SA') : '-'
+                  };
+                });
+
+                const avgCompletion = enrolledStudents.length > 0 ? Math.round(totalCompletion / enrolledStudents.length) : 0;
+                const avgQuizPass = studentData.length > 0 ? Math.round(studentData.reduce((a, b) => a + b.quizPass, 0) / studentData.length) : 0;
+
+                return (
+                  <div className="relative z-10 space-y-8">
+                    {/* Stat Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
+                        <Users className="mx-auto mb-3 text-blue-400" size={28} />
+                        <p className="text-4xl font-black text-white">{enrolledStudents.length}</p>
+                        <p className="text-gray-400 text-sm font-bold mt-1">طالب مسجل</p>
+                      </div>
+                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
+                        <CheckCircle2 className="mx-auto mb-3 text-emerald-400" size={28} />
+                        <p className="text-4xl font-black text-white">{avgCompletion}%</p>
+                        <p className="text-gray-400 text-sm font-bold mt-1">متوسط الإكمال</p>
+                        <div className="w-full bg-white/10 rounded-full h-2 mt-3">
+                          <div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${avgCompletion}%` }} />
+                        </div>
+                      </div>
+                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
+                        <HelpCircle className="mx-auto mb-3 text-amber-400" size={28} />
+                        <p className="text-4xl font-black text-white">{avgQuizPass}%</p>
+                        <p className="text-gray-400 text-sm font-bold mt-1">نسبة اجتياز الاختبارات</p>
+                        <div className="w-full bg-white/10 rounded-full h-2 mt-3">
+                          <div className="bg-amber-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${avgQuizPass}%` }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Student Table */}
+                    <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 overflow-hidden">
+                      <div className="p-6 border-b border-white/10">
+                        <h3 className="font-black text-white text-lg">تفاصيل الطلاب المسجلين</h3>
+                      </div>
+                      {studentData.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-white/10 text-gray-400">
+                                <th className="text-right p-4 font-black">الاسم</th>
+                                <th className="text-right p-4 font-black">الصف</th>
+                                <th className="text-right p-4 font-black">الشعبة</th>
+                                <th className="text-right p-4 font-black">الإكمال</th>
+                                <th className="text-right p-4 font-black">آخر دخول</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {studentData.map(s => (
+                                <tr key={s.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                  <td className="p-4 text-white font-bold">{s.name}</td>
+                                  <td className="p-4 text-gray-400">{s.grade}</td>
+                                  <td className="p-4 text-gray-400">{s.section}</td>
+                                  <td className="p-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-20 bg-white/10 rounded-full h-2">
+                                        <div className={`h-2 rounded-full ${s.completion >= 80 ? 'bg-emerald-500' : s.completion >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${s.completion}%` }} />
+                                      </div>
+                                      <span className="text-white font-bold text-xs">{s.completion}%</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-4 text-gray-500 text-xs">{s.lastAccessed}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="p-12 text-center text-gray-500">
+                          <Users size={40} className="mx-auto mb-4 opacity-30" />
+                          <p className="font-bold">لا يوجد طلاب مسجلين في هذه الدورة بعد</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>,
+          document.body
         )}
 
         <ConfirmModal
