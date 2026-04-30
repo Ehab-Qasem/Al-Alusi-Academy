@@ -190,16 +190,23 @@ class MockBackendService {
     }
   }
 
-  private async postAPI(endpoint: string, data: any) {
-    if (this.OFFLINE_MODE) return; // Skip post in offline mode
+  private async postAPI<T = any>(endpoint: string, data: any): Promise<T | null> {
+    if (this.OFFLINE_MODE) return null; // Skip post in offline mode
     try {
-      await fetch(`${API_BASE}${endpoint}`, {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ message: res.statusText }));
+        console.error(`API Post Failed for ${endpoint}:`, errBody);
+        return null;
+      }
+      return await res.json();
     } catch (e) {
       console.error(`API Post Failed for ${endpoint}`, e);
+      return null;
     }
   }
 
@@ -386,7 +393,7 @@ class MockBackendService {
     return this.courses.find(c => c.id === id);
   }
 
-  saveCourse(course: Course) {
+  async saveCourse(course: Course) {
     const idx = this.courses.findIndex(c => c.id === course.id);
     if (idx >= 0) {
       this.courses[idx] = course;
@@ -405,7 +412,25 @@ class MockBackendService {
     delete payload.isPublic;
     delete payload.landingPageConfig;
 
-    this.postAPI('/courses', payload);
+    if (!this.OFFLINE_MODE) {
+      try {
+        const res = await fetch(`${API_BASE}/courses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({ message: res.statusText }));
+          console.error('Course Save API Error:', errBody);
+          this.persistAll(); // Still persist locally as fallback
+          throw new Error(errBody.message || errBody.error || `Server error ${res.status}`);
+        }
+      } catch (e) {
+        this.persistAll(); // Persist locally even on network error
+        throw e;
+      }
+    }
+
     this.persistAll();
     return course;
   }

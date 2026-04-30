@@ -5,7 +5,7 @@ import { AlertTriangle } from 'lucide-react';
 interface ConfirmModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onConfirm: () => void;
+    onConfirm: () => void | Promise<void>;
     title: string;
     message: string;
     confirmText?: string;
@@ -37,7 +37,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
                             {cancelText}
                         </button>
                         <button
-                            onClick={() => { onConfirm(); onClose(); }}
+                            onClick={async () => { await onConfirm(); onClose(); }}
                             className={`flex-1 px-5 py-3 rounded-xl font-bold text-white shadow-lg transition transform hover:-translate-y-0.5 ${type === 'danger' ? 'bg-red-600 hover:bg-red-700 shadow-red-500/30' : 'bg-primary-600 hover:bg-primary-700 shadow-primary-500/30'}`}
                         >
                             {confirmText}

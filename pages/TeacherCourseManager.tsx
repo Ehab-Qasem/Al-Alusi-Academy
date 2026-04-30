@@ -88,7 +88,7 @@ const TeacherCourseManager = () => {
     isOpen: false,
     title: '',
     message: '',
-    onConfirm: () => { },
+    onConfirm: () => {},
     type: 'danger' as 'danger' | 'info'
   });
 
@@ -201,7 +201,7 @@ const TeacherCourseManager = () => {
     });
   };
 
-  const handleSaveCourse = () => {
+  const handleSaveCourse = async () => {
     if (!editingCourse) return;
     if (!editingCourse.title) return toast.error('يرجى إدخال عنوان للدورة');
 
@@ -213,27 +213,37 @@ const TeacherCourseManager = () => {
         title: 'تنبيه: وحدات فارغة',
         message: 'يوجد وحدات فارغة بدون دروس. سيتم حذفها تلقائياً عند الحفظ. هل تود المتابعة؟',
         type: 'info',
-        onConfirm: () => {
+        onConfirm: async () => {
           const cleanedCourse = {
             ...editingCourse,
             modules: editingCourse.modules.filter(m => m.content.length > 0)
           };
           setEditingCourse(cleanedCourse);
           setInitialEditingCourse(cleanedCourse);
-          backend.saveCourse(cleanedCourse);
-          setCourses(backend.getCourses());
-          setView('list');
-          toast.success('تم حفظ الدورة وحذف الوحدات الفارغة');
+          try {
+            await backend.saveCourse(cleanedCourse);
+            setCourses(backend.getCourses());
+            setView('list');
+            toast.success('تم حفظ الدورة وحذف الوحدات الفارغة');
+          } catch (e: any) {
+            toast.error(`فشل حفظ الدورة في قاعدة البيانات: ${e.message || 'خطأ غير متوقع'}`, { duration: 5000 });
+            console.error('Course save failed:', e);
+          }
         }
       });
       return; 
     }
 
-    backend.saveCourse(editingCourse);
-    setInitialEditingCourse(editingCourse);
-    setCourses(backend.getCourses());
-    setView('list');
-    toast.success('تم حفظ الدورة بنجاح');
+    try {
+      await backend.saveCourse(editingCourse);
+      setInitialEditingCourse(editingCourse);
+      setCourses(backend.getCourses());
+      setView('list');
+      toast.success('تم حفظ الدورة بنجاح');
+    } catch (e: any) {
+      toast.error(`فشل حفظ الدورة في قاعدة البيانات: ${e.message || 'خطأ غير متوقع'}`, { duration: 5000 });
+      console.error('Course save failed:', e);
+    }
   };
 
   const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

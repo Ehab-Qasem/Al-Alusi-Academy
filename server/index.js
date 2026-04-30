@@ -241,7 +241,7 @@ app.post('/api/courses', asyncHandler(async (req, res) => {
                   create: (m.content || []).map(c => ({
                     id: c.id || undefined, // Preserve ID if exists
                     title: c.title || 'Untitled',
-                    type: c.type || 'VIDEO',
+                    type: c.type || 'video',
                     url: c.url || null,
                     duration: parseInt(c.duration) || 0,
                     quizId: c.quizId || null,
@@ -289,7 +289,7 @@ app.post('/api/courses', asyncHandler(async (req, res) => {
               create: (m.content || []).map(c => ({
                 id: c.id || undefined,
                 title: c.title || 'Untitled',
-                type: c.type || 'VIDEO',
+                type: c.type || 'video',
                 url: c.url || null,
                 duration: parseInt(c.duration) || 0,
                 quizId: c.quizId || null,
