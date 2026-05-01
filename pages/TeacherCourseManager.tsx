@@ -103,7 +103,7 @@ const TeacherCourseManager = () => {
   const statsRef = useRef<HTMLDivElement>(null);
   const [statsSearch, setStatsSearch] = useState('');
   const [statsSortBy, setStatsSortBy] = useState<'completion_desc' | 'name_asc' | 'date_desc'>('completion_desc');
-  const [statsRoleFilter, setStatsRoleFilter] = useState({ student: true, guest: true });
+  const [statsRoleFilter, setStatsRoleFilter] = useState({ student: true, guest: true, user: true });
   const [statsGrade, setStatsGrade] = useState('');
   const [statsSection, setStatsSection] = useState('');
 
