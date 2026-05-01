@@ -968,114 +968,117 @@ const TeacherCourseManager = () => {
               <div className="absolute -top-20 -right-20 w-80 h-80 bg-emerald-500/20 blur-[120px] rounded-full pointer-events-none" />
               <div className="absolute -bottom-20 -left-20 w-80 h-80 bg-blue-500/20 blur-[120px] rounded-full pointer-events-none" />
 
-              {/* Header */}
-              <div className="flex justify-between items-start mb-10 relative z-10">
-                <div>
-                  <h2 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-blue-400 tracking-tight flex items-center gap-3">
-                    <BarChart3 size={28} /> إحصائيات الدورة
-                  </h2>
-                  <p className="text-gray-400 mt-1 font-bold">{statsModalCourse.title}</p>
-                </div>
-                {(() => {
-                  const allUsersMap = new Map(backend.getUsers().map(u => [u.id, u]));
-                  const allContent = statsModalCourse.modules.flatMap(m => m.content);
-                  const totalItems = allContent.length;
-                  const quizzes = allContent.filter(c => c.type === ContentType.QUIZ);
+              {(() => {
+                const allUsers = backend.getUsers();
+                const allContent = statsModalCourse.modules.flatMap(m => m.content);
+                const totalItems = allContent.length;
+                const quizzes = allContent.filter(c => c.type === ContentType.QUIZ);
+                
+                const enrolledStudents = allUsers.filter(u =>
+                  u.role === 'student' && u.enrolledCourses?.some((ec: any) => (typeof ec === 'string' ? ec : ec.id) === statsModalCourse.id)
+                );
+                
+                // Collect raw data for enrolled/progress
+                const rawData = enrolledStudents.map(u => {
+                  const id = u.id;
+                  const prog = backend.getProgress(id, statsModalCourse.id);
                   
-                  // Collect raw data for enrolled/progress
-                  const rawData = statsModalCourse.enrolledStudents?.map(es => {
-                    const id = typeof es === 'string' ? es : es.id;
-                    const u = allUsersMap.get(id);
-                    const prog = backend.getProgress(id, statsModalCourse.id);
-                    
-                    const completedCount = prog?.completedItems?.length || 0;
-                    const completion = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
-                    
-                    let quizAvg: number | null = null;
-                    if (quizzes.length > 0) {
-                      let totalScore = 0;
-                      let attempted = 0;
-                      quizzes.forEach(q => {
-                        const score = prog?.quizScores?.[q.id];
-                        if (score !== undefined) {
-                          totalScore += score;
-                          attempted++;
-                        }
-                      });
-                      if (attempted > 0) quizAvg = Math.round(totalScore / attempted);
-                    }
-                    
-                    const now = new Date().getTime();
-                    const lastAcc = prog?.lastAccessed ? new Date(prog.lastAccessed).getTime() : 0;
-                    const isInactive = completion < 100 && lastAcc > 0 && (now - lastAcc) > 7 * 24 * 60 * 60 * 1000;
-                    
-                    // Bottleneck logic: Find first incomplete content item
-                    let bottleneckItemId = null;
-                    if (completion < 100) {
-                      for (const mod of statsModalCourse.modules) {
-                        const firstIncomplete = mod.content.find(c => !prog?.completedItems?.includes(c.id));
-                        if (firstIncomplete) {
-                          bottleneckItemId = firstIncomplete.id;
-                          break;
-                        }
+                  const completedCount = prog?.completedItems?.length || 0;
+                  const completion = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
+                  
+                  let quizAvg: number | null = null;
+                  if (quizzes.length > 0) {
+                    let totalScore = 0;
+                    let attempted = 0;
+                    quizzes.forEach(q => {
+                      const score = prog?.quizScores?.[q.id];
+                      if (score !== undefined) {
+                        totalScore += score;
+                        attempted++;
                       }
-                    }
-
-                    return {
-                      id,
-                      name: u?.fullName || 'غير معروف',
-                      role: u?.role || UserRole.STUDENT,
-                      grade: u?.gradeLevel || '-',
-                      section: u?.classSection || '-',
-                      completion,
-                      quizAvg,
-                      lastAccessed: lastAcc,
-                      lastAccessedStr: lastAcc > 0 ? new Date(lastAcc).toLocaleDateString('ar-SA') : '-',
-                      isInactive,
-                      bottleneckItemId
-                    };
-                  }) || [];
-
-                  // Apply Filters
-                  let filtered = rawData.filter(f => {
-                    if (f.role === UserRole.STUDENT && !statsRoleFilter.student) return false;
-                    if (f.role === UserRole.EXTERNAL && !statsRoleFilter.user) return false;
-                    if (f.role === UserRole.GUEST && !statsRoleFilter.guest) return false;
-                    if (![UserRole.STUDENT, UserRole.EXTERNAL, UserRole.GUEST].includes(f.role as any) && !statsRoleFilter.user) return false;
-                    return true;
-                  });
-
-                  if (statsGrade) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.grade === statsGrade);
-                  if (statsSection) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.section === statsSection);
-                  if (statsSearch) filtered = filtered.filter(f => f.name.toLowerCase().includes(statsSearch.toLowerCase()));
-
-                  // Sorting
-                  filtered.sort((a, b) => {
-                    if (statsSortBy === 'completion_desc') return b.completion - a.completion;
-                    if (statsSortBy === 'name_asc') return a.name.localeCompare(b.name, 'ar');
-                    if (statsSortBy === 'date_desc') return b.lastAccessed - a.lastAccessed;
-                    return 0;
-                  });
-
-                  const avgCompletion = rawData.length > 0 ? Math.round(rawData.reduce((a, b) => a + b.completion, 0) / rawData.length) : 0;
-                  
-                  // Bottleneck Calculation
-                  let bottleneckTitle = 'لا يوجد';
-                  if (rawData.length > 0) {
-                    const bottlenecks: Record<string, number> = {};
-                    rawData.forEach(r => {
-                      if (r.bottleneckItemId) bottlenecks[r.bottleneckItemId] = (bottlenecks[r.bottleneckItemId] || 0) + 1;
                     });
-                    const maxBottleneck = Object.entries(bottlenecks).sort((a, b) => b[1] - a[1])[0];
-                    if (maxBottleneck) {
-                      const item = allContent.find(c => c.id === maxBottleneck[0]);
-                      if (item) bottleneckTitle = item.title;
+                    if (attempted > 0) quizAvg = Math.round(totalScore / attempted);
+                  }
+                  
+                  const now = new Date().getTime();
+                  const lastAcc = prog?.lastAccessed ? new Date(prog.lastAccessed).getTime() : 0;
+                  const isInactive = completion < 100 && lastAcc > 0 && (now - lastAcc) > 7 * 24 * 60 * 60 * 1000;
+                  
+                  // Bottleneck logic: Find first incomplete content item
+                  let bottleneckItemId = null;
+                  if (completion < 100) {
+                    for (const mod of statsModalCourse.modules) {
+                      const firstIncomplete = mod.content.find(c => !prog?.completedItems?.includes(c.id));
+                      if (firstIncomplete) {
+                        bottleneckItemId = firstIncomplete.id;
+                        break;
+                      }
                     }
                   }
 
-                  return (
-                    <>
-                      <div className="flex gap-3 absolute top-0 left-0">
+                  return {
+                    id,
+                    name: u.fullName || 'غير معروف',
+                    role: u.role || UserRole.STUDENT,
+                    grade: u.gradeLevel || '-',
+                    section: u.classSection || '-',
+                    completion,
+                    quizAvg,
+                    lastAccessed: lastAcc,
+                    lastAccessedStr: lastAcc > 0 ? new Date(lastAcc).toLocaleDateString('ar-SA') : '-',
+                    isInactive,
+                    bottleneckItemId
+                  };
+                });
+
+                // Apply Filters
+                let filtered = rawData.filter(f => {
+                  if (f.role === UserRole.STUDENT && !statsRoleFilter.student) return false;
+                  if (f.role === UserRole.EXTERNAL && !statsRoleFilter.user) return false;
+                  if (f.role === UserRole.GUEST && !statsRoleFilter.guest) return false;
+                  if (![UserRole.STUDENT, UserRole.EXTERNAL, UserRole.GUEST].includes(f.role as any) && !statsRoleFilter.user) return false;
+                  return true;
+                });
+
+                if (statsGrade) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.grade === statsGrade);
+                if (statsSection) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.section === statsSection);
+                if (statsSearch) filtered = filtered.filter(f => f.name.toLowerCase().includes(statsSearch.toLowerCase()));
+
+                // Sorting
+                filtered.sort((a, b) => {
+                  if (statsSortBy === 'completion_desc') return b.completion - a.completion;
+                  if (statsSortBy === 'name_asc') return a.name.localeCompare(b.name, 'ar');
+                  if (statsSortBy === 'date_desc') return b.lastAccessed - a.lastAccessed;
+                  return 0;
+                });
+
+                const avgCompletion = rawData.length > 0 ? Math.round(rawData.reduce((a, b) => a + b.completion, 0) / rawData.length) : 0;
+                
+                // Bottleneck Calculation
+                let bottleneckTitle = 'لا يوجد';
+                if (rawData.length > 0) {
+                  const bottlenecks: Record<string, number> = {};
+                  rawData.forEach(r => {
+                    if (r.bottleneckItemId) bottlenecks[r.bottleneckItemId] = (bottlenecks[r.bottleneckItemId] || 0) + 1;
+                  });
+                  const maxBottleneck = Object.entries(bottlenecks).sort((a, b) => b[1] - a[1])[0];
+                  if (maxBottleneck) {
+                    const item = allContent.find(c => c.id === maxBottleneck[0]);
+                    if (item) bottleneckTitle = item.title;
+                  }
+                }
+
+                return (
+                  <>
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-10 relative z-10">
+                      <div>
+                        <h2 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-blue-400 tracking-tight flex items-center gap-3">
+                          <BarChart3 size={28} /> إحصائيات الدورة
+                        </h2>
+                        <p className="text-gray-400 mt-1 font-bold">{statsModalCourse.title}</p>
+                      </div>
+                      <div className="flex gap-3">
                         <button onClick={() => handleExportStats(filtered, 'csv')} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-green-400 transition-all active:scale-90" title="تصدير CSV">
                           <FileDown size={20} />
                         </button>
@@ -1092,7 +1095,7 @@ const TeacherCourseManager = () => {
                       </div>
                     </div>
 
-                    <div className="relative z-10 space-y-8">
+                    <div className="relative z-10 space-y-8 mt-10">
                       {/* Stat Cards */}
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
@@ -1104,9 +1107,6 @@ const TeacherCourseManager = () => {
                           <CheckCircle2 className="mx-auto mb-2 text-emerald-400" size={24} />
                           <p className="text-3xl font-black text-white">{avgCompletion}%</p>
                           <p className="text-gray-400 text-xs font-bold mt-1">متوسط الإكمال</p>
-                          <div className="w-full bg-white/10 rounded-full h-1.5 mt-2">
-                            <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${avgCompletion}%` }} />
-                          </div>
                         </div>
                         <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
                           <HelpCircle className="mx-auto mb-2 text-amber-400" size={24} />
@@ -1120,73 +1120,8 @@ const TeacherCourseManager = () => {
                         </div>
                       </div>
 
-                      {/* Filters */}
-                      <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 p-5 space-y-4">
-                        <div className="flex flex-col md:flex-row gap-4 justify-between">
-                          <div className="flex gap-3 flex-1">
-                            <div className="relative flex-1 max-w-sm">
-                              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                              <input
-                                type="text"
-                                className="w-full pl-4 pr-10 py-2.5 rounded-xl border-0 bg-white/10 text-white placeholder-gray-400 shadow-inner focus:ring-2 focus:ring-primary-500 outline-none"
-                                placeholder="ابحث بالاسم..."
-                                value={statsSearch}
-                                onChange={e => setStatsSearch(e.target.value)}
-                              />
-                            </div>
-                            <select
-                              className="py-2.5 px-4 rounded-xl text-sm border-0 bg-white/10 text-white shadow-inner focus:ring-2 focus:ring-primary-500 outline-none cursor-pointer"
-                              value={statsSortBy}
-                              onChange={e => setStatsSortBy(e.target.value as any)}
-                            >
-                              <option value="completion_desc" className="text-black">الأعلى إنجازاً</option>
-                              <option value="name_asc" className="text-black">أبجدياً</option>
-                              <option value="date_desc" className="text-black">الأحدث دخولاً</option>
-                            </select>
-                          </div>
-                          
-                          <div className="flex gap-2">
-                            <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${statsRoleFilter.student ? 'bg-primary-500/20 text-primary-300 border border-primary-500/50' : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'}`}>
-                              <input type="checkbox" className="hidden" checked={statsRoleFilter.student} onChange={e => setStatsRoleFilter(p => ({ ...p, student: e.target.checked }))} />
-                              {statsRoleFilter.student && <Check size={14} />} الطلاب
-                            </label>
-                            <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${statsRoleFilter.guest ? 'bg-orange-500/20 text-orange-300 border border-orange-500/50' : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'}`}>
-                              <input type="checkbox" className="hidden" checked={statsRoleFilter.guest} onChange={e => setStatsRoleFilter(p => ({ ...p, guest: e.target.checked }))} />
-                              {statsRoleFilter.guest && <Check size={14} />} الزوار
-                            </label>
-                          </div>
-                        </div>
-
-                        {statsRoleFilter.student && (
-                          <div className="flex gap-3 pt-3 border-t border-white/10 animate-in slide-in-from-top-2">
-                            <select
-                              className="py-2 px-3 rounded-xl text-xs border-0 bg-white/10 text-white shadow-inner outline-none"
-                              value={statsGrade}
-                              onChange={e => { setStatsGrade(e.target.value); setStatsSection(''); }}
-                            >
-                              <option value="" className="text-black">كل الصفوف</option>
-                              {backend.getGrades().map(g => <option key={g.id} value={g.name} className="text-black">{g.name}</option>)}
-                            </select>
-                            <select
-                              className="py-2 px-3 rounded-xl text-xs border-0 bg-white/10 text-white shadow-inner outline-none disabled:opacity-50"
-                              value={statsSection}
-                              onChange={e => setStatsSection(e.target.value)}
-                              disabled={!statsGrade}
-                            >
-                              <option value="" className="text-black">كل الشعب</option>
-                              {backend.getGrades().find(g => g.name === statsGrade)?.sections.map(s => (
-                                <option key={s} value={s} className="text-black">{s}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-
                       {/* Student Table */}
                       <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 overflow-hidden">
-                        <div className="p-5 border-b border-white/10">
-                          <h3 className="font-black text-white text-lg">تفاصيل المسجلين <span className="text-sm font-normal text-gray-400">({filtered.length})</span></h3>
-                        </div>
                         {filtered.length > 0 ? (
                           <div className="overflow-x-auto custom-scrollbar">
                             <table className="w-full text-sm text-right">
@@ -1202,37 +1137,9 @@ const TeacherCourseManager = () => {
                               <tbody>
                                 {filtered.map((s, idx) => (
                                   <tr key={s.id} className="border-b border-white/5 hover:bg-white/10 transition-colors">
-                                    <td className="p-4 text-white font-bold whitespace-nowrap">
-                                      <div className="flex items-center gap-2">
-                                        {idx < 3 && statsSortBy === 'completion_desc' && (
-                                          <span className="text-lg drop-shadow-sm">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
-                                        )}
-                                        {s.name}
-                                      </div>
-                                    </td>
-                                    <td className="p-4 whitespace-nowrap">
-                                      {s.role === UserRole.STUDENT ? (
-                                        <div className="text-xs font-bold text-primary-300 bg-primary-900/40 border border-primary-800/50 px-2 py-1 rounded-lg inline-block">
-                                          {s.grade !== '-' ? s.grade : 'طالب'} {s.section !== '-' ? `- ${s.section}` : ''}
-                                        </div>
-                                      ) : s.role === UserRole.GUEST ? (
-                                        <div className="text-xs font-bold text-orange-300 bg-orange-900/40 border border-orange-800/50 px-2 py-1 rounded-lg inline-block">
-                                          زائر
-                                        </div>
-                                      ) : (
-                                        <div className="text-xs font-bold text-indigo-300 bg-indigo-900/40 border border-indigo-800/50 px-2 py-1 rounded-lg inline-block">
-                                          مستخدم خارجي
-                                        </div>
-                                      )}
-                                    </td>
-                                    <td className="p-4 whitespace-nowrap">
-                                      <div className="flex items-center gap-3">
-                                        <div className="w-24 bg-white/10 rounded-full h-2">
-                                          <div className={`h-2 rounded-full ${s.completion >= 80 ? 'bg-emerald-500' : s.completion >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${s.completion}%` }} />
-                                        </div>
-                                        <span className="text-white font-bold text-xs">{s.completion}%</span>
-                                      </div>
-                                    </td>
+                                    <td className="p-4 text-white font-bold whitespace-nowrap">{s.name}</td>
+                                    <td className="p-4 whitespace-nowrap">{s.grade} - {s.section}</td>
+                                    <td className="p-4 whitespace-nowrap">{s.completion}%</td>
                                     <td className="p-4 text-center font-black whitespace-nowrap">
                                       {s.quizAvg !== null ? (
                                         <span className={s.quizAvg >= 60 ? 'text-emerald-400' : 'text-red-400'}>{s.quizAvg}%</span>
@@ -1244,7 +1151,7 @@ const TeacherCourseManager = () => {
                                       <div className="flex items-center gap-2">
                                         <span className="text-gray-400 text-xs">{s.lastAccessedStr}</span>
                                         {s.isInactive && (
-                                          <div title="طالب خامل: لم يكمل الدورة ولم يدخل منذ أكثر من 7 أيام" className="text-rose-400 animate-pulse">
+                                          <div title="طالب خامل" className="text-rose-400 animate-pulse">
                                             <AlertTriangle size={14} />
                                           </div>
                                         )}
@@ -1255,7 +1162,15 @@ const TeacherCourseManager = () => {
                               </tbody>
                             </table>
                           </div>
-                  </div>
+                        ) : (
+                          <div className="p-12 text-center text-gray-500">
+                            <Users size={40} className="mx-auto mb-4 opacity-30" />
+                            <p className="font-bold">لا يوجد مسجلين مطابقين للبحث والفلاتر</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 );
               })()}
             </div>
