@@ -3,8 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { backend } from '../services/mockBackend';
-import { Course, CourseCategory, Subject, ContentType, Module, ContentItem, Question, CertificateTemplate } from '../types';
-import { Plus, Trash2, Save, Video, FileText, Globe, Shield, Settings2, Palette, Layout, ExternalLink, Image as ImageIcon, ChevronDown, ChevronUp, Edit3, Eye, MoreVertical, Upload, Link as LinkIcon, HelpCircle, Search, CheckSquare, ArrowRight, EyeOff, CheckCircle2, List, AlertCircle, GripVertical, Copy, BarChart3, Printer, Download, Users, X } from 'lucide-react';
+import { Course, CourseCategory, Subject, ContentType, Module, ContentItem, Question, CertificateTemplate, UserRole } from '../types';
+import { Plus, Trash2, Save, Video, FileText, Globe, Shield, Settings2, Palette, Layout, ExternalLink, Image as ImageIcon, ChevronDown, ChevronUp, Edit3, Eye, MoreVertical, Upload, Link as LinkIcon, HelpCircle, Search, CheckSquare, ArrowRight, EyeOff, CheckCircle2, List, AlertCircle, GripVertical, Copy, BarChart3, Printer, Download, Users, X, Check, AlertTriangle, FileDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CATEGORY_LABELS, SUBJECT_TRANSLATIONS } from '../constants';
 import CustomSelect from '../components/CustomSelect';
@@ -101,6 +101,11 @@ const TeacherCourseManager = () => {
   // Analytics Modal State
   const [statsModalCourse, setStatsModalCourse] = useState<Course | null>(null);
   const statsRef = useRef<HTMLDivElement>(null);
+  const [statsSearch, setStatsSearch] = useState('');
+  const [statsSortBy, setStatsSortBy] = useState<'completion_desc' | 'name_asc' | 'date_desc'>('completion_desc');
+  const [statsRoleFilter, setStatsRoleFilter] = useState({ student: true, guest: true });
+  const [statsGrade, setStatsGrade] = useState('');
+  const [statsSection, setStatsSection] = useState('');
 
   // --- HANDLERS: Duplicate / Preview / Analytics ---
   const handleDuplicateCourse = async (courseId: string) => {
@@ -124,22 +129,132 @@ const TeacherCourseManager = () => {
     window.print();
   };
 
-  const handleDownloadStatsPDF = async () => {
-    if (!statsRef.current) return;
-    const toastId = toast.loading('جاري تجهيز التقرير...');
+  const generateCourseReportHTML = (filteredData: any[], course: Course, wrapperOnly = false) => {
+    const content = `
+      <div class="report-wrapper" id="pdf-report-content">
+        <style>
+          ${wrapperOnly ? '.report-wrapper { font-family: Tahoma, Arial, sans-serif; padding: 20px; color: #111; line-height: 1.5; background: #fff; direction: rtl; width: 800px; }' : ''}
+          .report-wrapper .header-section { text-align: center; border-bottom: 2px solid #059669; padding-bottom: 10px; margin-bottom: 20px; }
+          .report-wrapper h1 { color: #059669; margin: 0 0 5px 0; font-size: 24px; }
+          .report-wrapper h2 { color: #4b5563; margin: 0 0 15px 0; font-size: 18px; font-weight: normal; }
+          .report-wrapper .info-row { display: flex; justify-content: space-around; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; text-align: center; }
+          .report-wrapper .info-row div { font-size: 13px; color: #64748b; }
+          .report-wrapper .info-row div span { display: block; font-weight: bold; color: #1e293b; font-size: 16px; margin-top: 5px; }
+          .report-wrapper table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          .report-wrapper th, .report-wrapper td { border: 1px solid #cbd5e1; padding: 10px 12px; text-align: right; font-size: 13px; }
+          .report-wrapper th { background-color: #f1f5f9; font-weight: bold; color: #0f172a; }
+          .report-wrapper tr { page-break-inside: avoid; break-inside: avoid; }
+          .report-wrapper tr:nth-child(even) { background-color: #f8fafc; }
+          .report-wrapper .badge { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 11px; background: #e0e7ff; color: #4338ca; white-space: nowrap; border: 1px solid #c7d2fe; }
+          .report-wrapper .warn { color: #d97706; }
+        </style>
+        <div class="header-section">
+          <h1>\u062a\u0642\u0631\u064a\u0631 \u0625\u062d\u0635\u0627\u0626\u064a\u0627\u062a \u0627\u0644\u062f\u0648\u0631\u0629</h1>
+          <h2>${course.title}</h2>
+        </div>
+        <div class="info-row">
+          <div>\u0639\u062f\u062f \u0627\u0644\u0648\u062d\u062f\u0627\u062a <span>${course.modules.length}</span></div>
+          <div>\u0639\u062f\u062f \u0627\u0644\u062f\u0631\u0648\u0633 <span>${course.modules.flatMap(m => m.content).length}</span></div>
+          <div>\u0639\u062f\u062f \u0627\u0644\u0637\u0644\u0627\u0628 <span>${filteredData.length}</span></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th style="width:5%">\u0645</th>
+            <th style="width:25%">\u0627\u0644\u0637\u0627\u0644\u0628</th>
+            <th style="width:20%">\u0627\u0644\u0641\u0626\u0629/\u0627\u0644\u0641\u0635\u0644</th>
+            <th style="width:15%">\u0627\u0644\u0625\u0643\u0645\u0627\u0644</th>
+            <th style="width:15%">\u0645\u062a\u0648\u0633\u0637 \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a</th>
+            <th style="width:20%">\u0622\u062e\u0631 \u062f\u062e\u0648\u0644</th>
+          </tr></thead>
+          <tbody>
+            ${filteredData.map((row: any, i: number) => `
+              <tr>
+                <td>${i + 1}</td>
+                <td><strong>${row.name}</strong></td>
+                <td><span class="badge">${row.role === 'student' ? (row.grade !== '-' ? row.grade : '\u0637\u0627\u0644\u0628') + (row.section !== '-' ? ' - ' + row.section : '') : '\u0632\u0627\u0626\u0631'}</span></td>
+                <td><strong>${row.completion}%</strong></td>
+                <td>${row.quizAvg !== null ? row.quizAvg + '%' : '\u0644\u0627 \u064a\u0648\u062c\u062f'}</td>
+                <td${row.isInactive ? ' class="warn"' : ''}>${row.lastAccessedStr}${row.isInactive ? ' \u26a0\ufe0f' : ''}</td>
+              </tr>
+            `).join('')}
+            ${filteredData.length === 0 ? '<tr><td colspan="6" style="text-align:center; padding: 20px;">\u0644\u0627 \u062a\u0648\u062c\u062f \u0628\u064a\u0627\u0646\u0627\u062a</td></tr>' : ''}
+          </tbody>
+        </table>
+        <div style="margin-top: 30px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 10px;">
+          \u062a\u0645 \u0625\u0635\u062f\u0627\u0631 \u0647\u0630\u0627 \u0627\u0644\u062a\u0642\u0631\u064a\u0631 \u0622\u0644\u064a\u0627\u064b \u0628\u062a\u0627\u0631\u064a\u062e ${new Date().toLocaleString('ar-SA')}
+        </div>
+      </div>
+    `;
+    if (wrapperOnly) return `<div dir="rtl">${content}</div>`;
+    return `<html dir="rtl" lang="ar"><head><title>\u062a\u0642\u0631\u064a\u0631 - ${course.title}</title><style>@page{size:A4 portrait;margin:15mm}body{margin:0;padding:0;font-family:Tahoma,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#fff}</style></head><body>${content}</body></html>`;
+  };
+
+  const handleExportStats = async (filteredData: any[], format: 'print' | 'pdf' | 'csv') => {
+    if (!statsModalCourse) return;
+
+    if (format === 'csv') {
+      const BOM = '\uFEFF';
+      const headers = ['\u0627\u0644\u0627\u0633\u0645', '\u0627\u0644\u0635\u0641', '\u0627\u0644\u0634\u0639\u0628\u0629', '\u0646\u0633\u0628\u0629 \u0627\u0644\u0625\u0643\u0645\u0627\u0644 %', '\u0645\u062a\u0648\u0633\u0637 \u0627\u0644\u0627\u062e\u062a\u0628\u0627\u0631\u0627\u062a %', '\u0622\u062e\u0631 \u062f\u062e\u0648\u0644'].join(',');
+      const rows = filteredData.map((r: any) =>
+        [r.name, r.grade, r.section, r.completion, r.quizAvg !== null ? r.quizAvg : '-', r.lastAccessedStr].join(',')
+      );
+      const csvContent = BOM + headers + '\n' + rows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `\u062a\u0642\u0631\u064a\u0631_${statsModalCourse.title}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 \u0645\u0644\u0641 CSV');
+      return;
+    }
+
+    if (format === 'print') {
+      const printWindow = window.open('', '', 'width=900,height=600');
+      if (!printWindow) return;
+      printWindow.document.write(generateCourseReportHTML(filteredData, statsModalCourse));
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+      return;
+    }
+
+    // PDF
+    const toastId = toast.loading('\u062c\u0627\u0631\u064a \u062a\u0648\u0644\u064a\u062f \u0627\u0644\u0640 PDF...');
     try {
-      const html2canvas = (await import('html2canvas')).default;
+      const { default: html2canvas } = await import('html2canvas');
       const { jsPDF } = await import('jspdf');
-      const canvas = await html2canvas(statsRef.current, { scale: 2, useCORS: true, backgroundColor: '#1e293b' });
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const container = document.createElement('div');
+      container.style.position = 'absolute';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.innerHTML = generateCourseReportHTML(filteredData, statsModalCourse, true);
+      document.body.appendChild(container);
+      await new Promise(res => setTimeout(res, 500));
+      const element = container.querySelector('#pdf-report-content') as HTMLElement;
+      const canvas = await html2canvas(element, { scale: 2, useCORS: true, logging: false });
+      document.body.removeChild(container);
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const w = pdf.internal.pageSize.getWidth();
-      const h = (canvas.height * w) / canvas.width;
-      pdf.addImage(imgData, 'JPEG', 0, 0, w, h);
-      pdf.save(`course-stats-${statsModalCourse?.title || 'report'}.pdf`);
-      toast.success('تم تحميل التقرير', { id: toastId });
-    } catch (e) {
-      toast.error('فشل تحميل التقرير', { id: toastId });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+      pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+      heightLeft -= pageHeight;
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      pdf.save(`\u062a\u0642\u0631\u064a\u0631_${statsModalCourse.title}.pdf`);
+      toast.success('\u062a\u0645 \u062a\u062d\u0645\u064a\u0644 PDF', { id: toastId });
+    } catch (err) {
+      console.error(err);
+      toast.error('\u062d\u062f\u062b \u062e\u0637\u0623 \u0623\u062b\u0646\u0627\u0621 \u0627\u0644\u062a\u0635\u062f\u064a\u0631', { id: toastId });
     }
   };
 
@@ -861,132 +976,285 @@ const TeacherCourseManager = () => {
                   </h2>
                   <p className="text-gray-400 mt-1 font-bold">{statsModalCourse.title}</p>
                 </div>
-                <div className="flex gap-3">
-                  <button onClick={handlePrintStats} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-white transition-all active:scale-90" title="طباعة">
-                    <Printer size={20} />
-                  </button>
-                  <button onClick={handleDownloadStatsPDF} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-white transition-all active:scale-90" title="تحميل PDF">
-                    <Download size={20} />
-                  </button>
-                  <button onClick={() => setStatsModalCourse(null)} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-red-400 transition-all active:scale-90">
-                    <X size={20} />
-                  </button>
-                </div>
-              </div>
+                {(() => {
+                  const allUsersMap = new Map(backend.getUsers().map(u => [u.id, u]));
+                  const allContent = statsModalCourse.modules.flatMap(m => m.content);
+                  const totalItems = allContent.length;
+                  const quizzes = allContent.filter(c => c.type === ContentType.QUIZ);
+                  
+                  // Collect raw data for enrolled/progress
+                  const rawData = statsModalCourse.enrolledStudents?.map(es => {
+                    const id = typeof es === 'string' ? es : es.id;
+                    const u = allUsersMap.get(id);
+                    const prog = backend.getProgress(id, statsModalCourse.id);
+                    
+                    const completedCount = prog?.completedItems?.length || 0;
+                    const completion = totalItems > 0 ? Math.round((completedCount / totalItems) * 100) : 0;
+                    
+                    let quizAvg: number | null = null;
+                    if (quizzes.length > 0) {
+                      let totalScore = 0;
+                      let attempted = 0;
+                      quizzes.forEach(q => {
+                        const score = prog?.quizScores?.[q.id];
+                        if (score !== undefined) {
+                          totalScore += score;
+                          attempted++;
+                        }
+                      });
+                      if (attempted > 0) quizAvg = Math.round(totalScore / attempted);
+                    }
+                    
+                    const now = new Date().getTime();
+                    const lastAcc = prog?.lastAccessed ? new Date(prog.lastAccessed).getTime() : 0;
+                    const isInactive = completion < 100 && lastAcc > 0 && (now - lastAcc) > 7 * 24 * 60 * 60 * 1000;
+                    
+                    // Bottleneck logic: Find first incomplete content item
+                    let bottleneckItemId = null;
+                    if (completion < 100) {
+                      for (const mod of statsModalCourse.modules) {
+                        const firstIncomplete = mod.content.find(c => !prog?.completedItems?.includes(c.id));
+                        if (firstIncomplete) {
+                          bottleneckItemId = firstIncomplete.id;
+                          break;
+                        }
+                      }
+                    }
 
-              {/* Stats Cards */}
-              {(() => {
-                const allUsers = backend.getUsers();
-                const allContent = statsModalCourse.modules.flatMap(m => m.content);
-                const totalItems = allContent.length;
-                const quizzes = allContent.filter(c => c.type === ContentType.QUIZ);
-                const grades = backend.getGrades();
+                    return {
+                      id,
+                      name: u?.fullName || 'غير معروف',
+                      role: u?.role || UserRole.STUDENT,
+                      grade: u?.gradeLevel || '-',
+                      section: u?.classSection || '-',
+                      completion,
+                      quizAvg,
+                      lastAccessed: lastAcc,
+                      lastAccessedStr: lastAcc > 0 ? new Date(lastAcc).toLocaleDateString('ar-SA') : '-',
+                      isInactive,
+                      bottleneckItemId
+                    };
+                  }) || [];
 
-                // Find enrolled students
-                const enrolledStudents = allUsers.filter(u =>
-                  u.role === 'student' && u.enrolledCourses?.some((ec: any) => (typeof ec === 'string' ? ec : ec.id) === statsModalCourse.id)
-                );
-
-                // Calculate average completion
-                let totalCompletion = 0;
-                const studentData = enrolledStudents.map(s => {
-                  const prog = backend.getProgress(s.id, statsModalCourse.id);
-                  const completed = prog?.completedItems?.length || 0;
-                  const pct = totalItems > 0 ? Math.round((completed / totalItems) * 100) : 0;
-                  totalCompletion += pct;
-
-                  // Quiz pass rate for this student
-                  let quizPassed = 0;
-                  quizzes.forEach(q => {
-                    const score = prog?.quizScores?.[q.id];
-                    if (score !== undefined && score >= (q.passingScore || 60)) quizPassed++;
+                  // Apply Filters
+                  let filtered = rawData.filter(f => {
+                    if (f.role === UserRole.STUDENT && !statsRoleFilter.student) return false;
+                    if (f.role === UserRole.EXTERNAL && !statsRoleFilter.user) return false;
+                    if (f.role === UserRole.GUEST && !statsRoleFilter.guest) return false;
+                    if (![UserRole.STUDENT, UserRole.EXTERNAL, UserRole.GUEST].includes(f.role as any) && !statsRoleFilter.user) return false;
+                    return true;
                   });
 
-                  return {
-                    id: s.id,
-                    name: s.fullName,
-                    grade: s.gradeLevel || '-',
-                    section: s.classSection || '-',
-                    completion: pct,
-                    quizPass: quizzes.length > 0 ? Math.round((quizPassed / quizzes.length) * 100) : 0,
-                    lastAccessed: prog?.lastAccessed ? new Date(prog.lastAccessed).toLocaleDateString('ar-SA') : '-'
-                  };
-                });
+                  if (statsGrade) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.grade === statsGrade);
+                  if (statsSection) filtered = filtered.filter(f => f.role !== UserRole.STUDENT || f.section === statsSection);
+                  if (statsSearch) filtered = filtered.filter(f => f.name.toLowerCase().includes(statsSearch.toLowerCase()));
 
-                const avgCompletion = enrolledStudents.length > 0 ? Math.round(totalCompletion / enrolledStudents.length) : 0;
-                const avgQuizPass = studentData.length > 0 ? Math.round(studentData.reduce((a, b) => a + b.quizPass, 0) / studentData.length) : 0;
+                  // Sorting
+                  filtered.sort((a, b) => {
+                    if (statsSortBy === 'completion_desc') return b.completion - a.completion;
+                    if (statsSortBy === 'name_asc') return a.name.localeCompare(b.name, 'ar');
+                    if (statsSortBy === 'date_desc') return b.lastAccessed - a.lastAccessed;
+                    return 0;
+                  });
 
-                return (
-                  <div className="relative z-10 space-y-8">
-                    {/* Stat Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
-                        <Users className="mx-auto mb-3 text-blue-400" size={28} />
-                        <p className="text-4xl font-black text-white">{enrolledStudents.length}</p>
-                        <p className="text-gray-400 text-sm font-bold mt-1">طالب مسجل</p>
-                      </div>
-                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
-                        <CheckCircle2 className="mx-auto mb-3 text-emerald-400" size={28} />
-                        <p className="text-4xl font-black text-white">{avgCompletion}%</p>
-                        <p className="text-gray-400 text-sm font-bold mt-1">متوسط الإكمال</p>
-                        <div className="w-full bg-white/10 rounded-full h-2 mt-3">
-                          <div className="bg-emerald-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${avgCompletion}%` }} />
-                        </div>
-                      </div>
-                      <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-6 border border-white/15 shadow-xl text-center">
-                        <HelpCircle className="mx-auto mb-3 text-amber-400" size={28} />
-                        <p className="text-4xl font-black text-white">{avgQuizPass}%</p>
-                        <p className="text-gray-400 text-sm font-bold mt-1">نسبة اجتياز الاختبارات</p>
-                        <div className="w-full bg-white/10 rounded-full h-2 mt-3">
-                          <div className="bg-amber-500 h-2 rounded-full transition-all duration-1000" style={{ width: `${avgQuizPass}%` }} />
-                        </div>
+                  const avgCompletion = rawData.length > 0 ? Math.round(rawData.reduce((a, b) => a + b.completion, 0) / rawData.length) : 0;
+                  
+                  // Bottleneck Calculation
+                  let bottleneckTitle = 'لا يوجد';
+                  if (rawData.length > 0) {
+                    const bottlenecks: Record<string, number> = {};
+                    rawData.forEach(r => {
+                      if (r.bottleneckItemId) bottlenecks[r.bottleneckItemId] = (bottlenecks[r.bottleneckItemId] || 0) + 1;
+                    });
+                    const maxBottleneck = Object.entries(bottlenecks).sort((a, b) => b[1] - a[1])[0];
+                    if (maxBottleneck) {
+                      const item = allContent.find(c => c.id === maxBottleneck[0]);
+                      if (item) bottleneckTitle = item.title;
+                    }
+                  }
+
+                  return (
+                    <>
+                      <div className="flex gap-3 absolute top-0 left-0">
+                        <button onClick={() => handleExportStats(filtered, 'csv')} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-green-400 transition-all active:scale-90" title="تصدير CSV">
+                          <FileDown size={20} />
+                        </button>
+                        <button onClick={() => handleExportStats(filtered, 'print')} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-white transition-all active:scale-90" title="طباعة">
+                          <Printer size={20} />
+                        </button>
+                        <button onClick={() => handleExportStats(filtered, 'pdf')} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-red-400 transition-all active:scale-90" title="تحميل PDF">
+                          <Download size={20} />
+                        </button>
+                        <div className="w-px bg-white/10 mx-1"></div>
+                        <button onClick={() => setStatsModalCourse(null)} className="p-3 bg-white/20 dark:bg-slate-800/40 backdrop-blur-md border border-white/20 rounded-2xl text-gray-300 hover:text-red-500 transition-all active:scale-90" title="إغلاق">
+                          <X size={20} />
+                        </button>
                       </div>
                     </div>
 
-                    {/* Student Table */}
-                    <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 overflow-hidden">
-                      <div className="p-6 border-b border-white/10">
-                        <h3 className="font-black text-white text-lg">تفاصيل الطلاب المسجلين</h3>
+                    <div className="relative z-10 space-y-8">
+                      {/* Stat Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
+                          <Users className="mx-auto mb-2 text-blue-400" size={24} />
+                          <p className="text-3xl font-black text-white">{rawData.length}</p>
+                          <p className="text-gray-400 text-xs font-bold mt-1">المسجلين الكلي</p>
+                        </div>
+                        <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
+                          <CheckCircle2 className="mx-auto mb-2 text-emerald-400" size={24} />
+                          <p className="text-3xl font-black text-white">{avgCompletion}%</p>
+                          <p className="text-gray-400 text-xs font-bold mt-1">متوسط الإكمال</p>
+                          <div className="w-full bg-white/10 rounded-full h-1.5 mt-2">
+                            <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-1000" style={{ width: `${avgCompletion}%` }} />
+                          </div>
+                        </div>
+                        <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
+                          <HelpCircle className="mx-auto mb-2 text-amber-400" size={24} />
+                          <p className="text-3xl font-black text-white">{quizzes.length}</p>
+                          <p className="text-gray-400 text-xs font-bold mt-1">عدد الاختبارات بالدورة</p>
+                        </div>
+                        <div className="bg-white/10 dark:bg-slate-800/30 backdrop-blur-xl rounded-[2rem] p-5 border border-white/15 shadow-xl text-center">
+                          <AlertTriangle className="mx-auto mb-2 text-rose-400" size={24} />
+                          <p className="text-lg font-black text-white line-clamp-1 truncate" title={bottleneckTitle}>{bottleneckTitle}</p>
+                          <p className="text-gray-400 text-xs font-bold mt-1">الدرس الأكثر توقفاً عنده</p>
+                        </div>
                       </div>
-                      {studentData.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-white/10 text-gray-400">
-                                <th className="text-right p-4 font-black">الاسم</th>
-                                <th className="text-right p-4 font-black">الصف</th>
-                                <th className="text-right p-4 font-black">الشعبة</th>
-                                <th className="text-right p-4 font-black">الإكمال</th>
-                                <th className="text-right p-4 font-black">آخر دخول</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {studentData.map(s => (
-                                <tr key={s.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                  <td className="p-4 text-white font-bold">{s.name}</td>
-                                  <td className="p-4 text-gray-400">{s.grade}</td>
-                                  <td className="p-4 text-gray-400">{s.section}</td>
-                                  <td className="p-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-20 bg-white/10 rounded-full h-2">
-                                        <div className={`h-2 rounded-full ${s.completion >= 80 ? 'bg-emerald-500' : s.completion >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${s.completion}%` }} />
-                                      </div>
-                                      <span className="text-white font-bold text-xs">{s.completion}%</span>
-                                    </div>
-                                  </td>
-                                  <td className="p-4 text-gray-500 text-xs">{s.lastAccessed}</td>
-                                </tr>
+
+                      {/* Filters */}
+                      <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 p-5 space-y-4">
+                        <div className="flex flex-col md:flex-row gap-4 justify-between">
+                          <div className="flex gap-3 flex-1">
+                            <div className="relative flex-1 max-w-sm">
+                              <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                              <input
+                                type="text"
+                                className="w-full pl-4 pr-10 py-2.5 rounded-xl border-0 bg-white/10 text-white placeholder-gray-400 shadow-inner focus:ring-2 focus:ring-primary-500 outline-none"
+                                placeholder="ابحث بالاسم..."
+                                value={statsSearch}
+                                onChange={e => setStatsSearch(e.target.value)}
+                              />
+                            </div>
+                            <select
+                              className="py-2.5 px-4 rounded-xl text-sm border-0 bg-white/10 text-white shadow-inner focus:ring-2 focus:ring-primary-500 outline-none cursor-pointer"
+                              value={statsSortBy}
+                              onChange={e => setStatsSortBy(e.target.value as any)}
+                            >
+                              <option value="completion_desc" className="text-black">الأعلى إنجازاً</option>
+                              <option value="name_asc" className="text-black">أبجدياً</option>
+                              <option value="date_desc" className="text-black">الأحدث دخولاً</option>
+                            </select>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${statsRoleFilter.student ? 'bg-primary-500/20 text-primary-300 border border-primary-500/50' : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'}`}>
+                              <input type="checkbox" className="hidden" checked={statsRoleFilter.student} onChange={e => setStatsRoleFilter(p => ({ ...p, student: e.target.checked }))} />
+                              {statsRoleFilter.student && <Check size={14} />} الطلاب
+                            </label>
+                            <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${statsRoleFilter.guest ? 'bg-orange-500/20 text-orange-300 border border-orange-500/50' : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10'}`}>
+                              <input type="checkbox" className="hidden" checked={statsRoleFilter.guest} onChange={e => setStatsRoleFilter(p => ({ ...p, guest: e.target.checked }))} />
+                              {statsRoleFilter.guest && <Check size={14} />} الزوار
+                            </label>
+                          </div>
+                        </div>
+
+                        {statsRoleFilter.student && (
+                          <div className="flex gap-3 pt-3 border-t border-white/10 animate-in slide-in-from-top-2">
+                            <select
+                              className="py-2 px-3 rounded-xl text-xs border-0 bg-white/10 text-white shadow-inner outline-none"
+                              value={statsGrade}
+                              onChange={e => { setStatsGrade(e.target.value); setStatsSection(''); }}
+                            >
+                              <option value="" className="text-black">كل الصفوف</option>
+                              {backend.getGrades().map(g => <option key={g.id} value={g.name} className="text-black">{g.name}</option>)}
+                            </select>
+                            <select
+                              className="py-2 px-3 rounded-xl text-xs border-0 bg-white/10 text-white shadow-inner outline-none disabled:opacity-50"
+                              value={statsSection}
+                              onChange={e => setStatsSection(e.target.value)}
+                              disabled={!statsGrade}
+                            >
+                              <option value="" className="text-black">كل الشعب</option>
+                              {backend.getGrades().find(g => g.name === statsGrade)?.sections.map(s => (
+                                <option key={s} value={s} className="text-black">{s}</option>
                               ))}
-                            </tbody>
-                          </table>
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Student Table */}
+                      <div className="bg-white/5 dark:bg-slate-800/20 backdrop-blur-xl rounded-[2rem] border border-white/10 overflow-hidden">
+                        <div className="p-5 border-b border-white/10">
+                          <h3 className="font-black text-white text-lg">تفاصيل المسجلين <span className="text-sm font-normal text-gray-400">({filtered.length})</span></h3>
                         </div>
-                      ) : (
-                        <div className="p-12 text-center text-gray-500">
-                          <Users size={40} className="mx-auto mb-4 opacity-30" />
-                          <p className="font-bold">لا يوجد طلاب مسجلين في هذه الدورة بعد</p>
-                        </div>
-                      )}
-                    </div>
+                        {filtered.length > 0 ? (
+                          <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full text-sm text-right">
+                              <thead>
+                                <tr className="border-b border-white/10 text-gray-400">
+                                  <th className="p-4 font-black">الاسم</th>
+                                  <th className="p-4 font-black">الفئة/الفصل</th>
+                                  <th className="p-4 font-black">الإكمال</th>
+                                  <th className="p-4 font-black text-center">متوسط الاختبارات</th>
+                                  <th className="p-4 font-black">آخر دخول</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filtered.map((s, idx) => (
+                                  <tr key={s.id} className="border-b border-white/5 hover:bg-white/10 transition-colors">
+                                    <td className="p-4 text-white font-bold whitespace-nowrap">
+                                      <div className="flex items-center gap-2">
+                                        {idx < 3 && statsSortBy === 'completion_desc' && (
+                                          <span className="text-lg drop-shadow-sm">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
+                                        )}
+                                        {s.name}
+                                      </div>
+                                    </td>
+                                    <td className="p-4 whitespace-nowrap">
+                                      {s.role === UserRole.STUDENT ? (
+                                        <div className="text-xs font-bold text-primary-300 bg-primary-900/40 border border-primary-800/50 px-2 py-1 rounded-lg inline-block">
+                                          {s.grade !== '-' ? s.grade : 'طالب'} {s.section !== '-' ? `- ${s.section}` : ''}
+                                        </div>
+                                      ) : s.role === UserRole.GUEST ? (
+                                        <div className="text-xs font-bold text-orange-300 bg-orange-900/40 border border-orange-800/50 px-2 py-1 rounded-lg inline-block">
+                                          زائر
+                                        </div>
+                                      ) : (
+                                        <div className="text-xs font-bold text-indigo-300 bg-indigo-900/40 border border-indigo-800/50 px-2 py-1 rounded-lg inline-block">
+                                          مستخدم خارجي
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-4 whitespace-nowrap">
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-24 bg-white/10 rounded-full h-2">
+                                          <div className={`h-2 rounded-full ${s.completion >= 80 ? 'bg-emerald-500' : s.completion >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${s.completion}%` }} />
+                                        </div>
+                                        <span className="text-white font-bold text-xs">{s.completion}%</span>
+                                      </div>
+                                    </td>
+                                    <td className="p-4 text-center font-black whitespace-nowrap">
+                                      {s.quizAvg !== null ? (
+                                        <span className={s.quizAvg >= 60 ? 'text-emerald-400' : 'text-red-400'}>{s.quizAvg}%</span>
+                                      ) : (
+                                        <span className="text-gray-500 text-xs">لا يوجد</span>
+                                      )}
+                                    </td>
+                                    <td className="p-4 whitespace-nowrap">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-gray-400 text-xs">{s.lastAccessedStr}</span>
+                                        {s.isInactive && (
+                                          <div title="طالب خامل: لم يكمل الدورة ولم يدخل منذ أكثر من 7 أيام" className="text-rose-400 animate-pulse">
+                                            <AlertTriangle size={14} />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                   </div>
                 );
               })()}
